@@ -1,4 +1,7 @@
 # src/components/cnn.py
+# CNN components for JAX/Flax
+# NOTE: JAX Conv uses channels-LAST: (batch, height, width, channels)
+# PyTorch Conv uses channels-FIRST: (batch, channels, height, width)
 
 import jax
 import jax.numpy as jnp
@@ -9,7 +12,7 @@ from .fcn import FCNet
 
 
 class CNNPure1d(nn.Module):
-    """1D CNN with optimized convolutions"""
+    """1D CNN - expects input (batch, length, channels)"""
     conv_arch: list
     activation: str | Callable = 'Tanh'
     kernel_size: int = 5
@@ -23,17 +26,17 @@ class CNNPure1d(nn.Module):
             self.act_fn = self.activation
 
         # Create conv layers
+        # Note: in_channels is NOT used by Flax Conv - it infers from input
         self.conv_layers = [
             nn.Conv(
                 features=out_channels,
                 kernel_size=(self.kernel_size,),
                 strides=(self.stride,),
                 dtype=self.dtype,
+                padding='VALID',
                 name=f'conv_{i}'
             )
-            for i, (in_channels, out_channels) in enumerate(
-                zip(self.conv_arch[:-1], self.conv_arch[1:])
-            )
+            for i, out_channels in enumerate(self.conv_arch[1:])
         ]
 
     @nn.compact
@@ -95,7 +98,10 @@ class CNNet1d(nn.Module):
 
 
 class CNNPure2d(nn.Module):
-    """2D CNN with optimized convolutions"""
+    """2D CNN - expects input (batch, height, width, channels)
+
+    NOTE: JAX uses channels-LAST format, PyTorch uses channels-FIRST
+    """
     conv_arch: list
     activation: str | Callable = 'Tanh'
     kernel_size: Tuple[int, int] = (3, 3)
@@ -109,17 +115,17 @@ class CNNPure2d(nn.Module):
             self.act_fn = self.activation
 
         # Create conv layers
+        # Note: in_channels is NOT used by Flax Conv - it infers from input
         self.conv_layers = [
             nn.Conv(
                 features=out_channels,
                 kernel_size=self.kernel_size,
                 strides=(self.stride, self.stride),
                 dtype=self.dtype,
+                padding='VALID',
                 name=f'conv_{i}'
             )
-            for i, (in_channels, out_channels) in enumerate(
-                zip(self.conv_arch[:-1], self.conv_arch[1:])
-            )
+            for i, out_channels in enumerate(self.conv_arch[1:])
         ]
 
     @nn.compact
@@ -127,7 +133,7 @@ class CNNPure2d(nn.Module):
         """Forward pass
 
         Args:
-            x: Input (batch, height, width, channels)
+            x: Input (batch, height, width, channels) - CHANNELS LAST
 
         Returns:
             Output (batch, new_height, new_width, new_channels)
@@ -168,7 +174,7 @@ class CNNet2d(nn.Module):
         """Forward pass
 
         Args:
-            x: Input (batch, height, width, channels)
+            x: Input (batch, height, width, channels) - CHANNELS LAST
 
         Returns:
             Output (batch, fc_arch[-1])

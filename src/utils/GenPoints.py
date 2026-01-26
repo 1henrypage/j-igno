@@ -515,7 +515,7 @@ class Point2D:
             R_max: float = 1e-4,
             R_min: float = 1e-4,
             key: Optional[jax.Array] = None,
-            use_lhs: bool = False
+            use_lhs: bool = True
     ) -> Tuple[jnp.ndarray, jnp.ndarray]:
         """Generate centers of compact support regions
 
@@ -533,19 +533,7 @@ class Point2D:
             xc: Centers, shape (n_center, 1, 2)
             R: Radii, shape (n_center, 1, 1)
         """
-        # Validation
-        if R_max < R_min:
-            raise ValueError('R_max should be larger than R_min.')
-        lb_arr = jnp.array(self.lb)
-        ub_arr = jnp.array(self.ub)
-        if (2. * R_max) > jnp.min(ub_arr - lb_arr):
-            raise ValueError('R_max is too large.')
-        if R_min < 1e-4 and self.dtype == jnp.float32:
-            raise ValueError('R_min<1e-4 when data_type is jnp.float32!')
-        if R_min < 1e-10 and self.dtype == jnp.float64:
-            raise ValueError('R_min<1e-10 when data_type is jnp.float64!')
-
-        # Get key
+                # Get key
         if key is None:
             self.key, key = random.split(self.key)
 

@@ -1,13 +1,12 @@
 # src/components/nf.py
-# Neural Spline Flow - Optimized version with explicit handling of control flow
+# Neural Spline Flow - Fixed version
 
 import jax
 import jax.numpy as jnp
-from jax import random, vmap, jit, lax
+from jax import random, jit
 from flax import linen as nn
 from typing import Tuple
 from functools import partial
-import math
 
 
 # ============================================================================
@@ -21,7 +20,15 @@ DEFAULT_MIN_DERIVATIVE = 1e-3
 
 @jit
 def searchsorted(bin_locations: jax.Array, inputs: jax.Array, eps: float = 1e-6) -> jax.Array:
-    """Binary search for bin indices"""
+    """Binary search for bin indices
+
+    Args:
+        bin_locations: (batch, num_bins+1) or (batch, dim, num_bins+1)
+        inputs: (batch,) or (batch, dim)
+
+    Returns:
+        Bin indices with same shape as inputs
+    """
     bin_locations = bin_locations.at[..., -1].add(eps)
     return jnp.sum(inputs[..., None] >= bin_locations, axis=-1) - 1
 
@@ -38,15 +45,29 @@ def unconstrained_RQS(
         min_bin_height: float = DEFAULT_MIN_BIN_HEIGHT,
         min_derivative: float = DEFAULT_MIN_DERIVATIVE
 ) -> Tuple[jax.Array, jax.Array]:
-    """Unconstrained rational quadratic spline transformation"""
+    """Unconstrained rational quadratic spline transformation
 
+    Args:
+        inputs: (batch, dim)
+        unnormalized_widths: (batch, dim, K)
+        unnormalized_heights: (batch, dim, K)
+        unnormalized_derivatives: (batch, dim, K-1)
+
+    Returns:
+        outputs: (batch, dim)
+        logabsdet: (batch, dim)
+    """
     inside_intvl_mask = (inputs >= -tail_bound) & (inputs <= tail_bound)
 
-    # Pad derivatives
-    unnormalized_derivatives = jnp.pad(unnormalized_derivatives, ((0, 0), (1, 1)), mode='constant')
+    # Pad derivatives: (batch, dim, K-1) -> (batch, dim, K+1)
+    unnormalized_derivatives = jnp.pad(
+        unnormalized_derivatives,
+        ((0, 0), (0, 0), (1, 1)),  # pad last axis
+        mode='constant'
+    )
     constant = jnp.log(jnp.exp(1 - min_derivative) - 1)
-    unnormalized_derivatives = unnormalized_derivatives.at[:, 0].set(constant)
-    unnormalized_derivatives = unnormalized_derivatives.at[:, -1].set(constant)
+    unnormalized_derivatives = unnormalized_derivatives.at[:, :, 0].set(constant)
+    unnormalized_derivatives = unnormalized_derivatives.at[:, :, -1].set(constant)
 
     # Apply RQS to all points (we'll mask later)
     outputs_inside, logabsdet_inside = RQS(
@@ -86,19 +107,29 @@ def RQS(
         min_bin_height: float = DEFAULT_MIN_BIN_HEIGHT,
         min_derivative: float = DEFAULT_MIN_DERIVATIVE
 ) -> Tuple[jax.Array, jax.Array]:
-    """Rational quadratic spline transformation"""
+    """Rational quadratic spline transformation
 
+    Args:
+        inputs: (batch, dim)
+        unnormalized_widths: (batch, dim, K)
+        unnormalized_heights: (batch, dim, K)
+        unnormalized_derivatives: (batch, dim, K+1) - already padded
+
+    Returns:
+        outputs: (batch, dim)
+        logabsdet: (batch, dim)
+    """
     num_bins = unnormalized_widths.shape[-1]
 
-    # Compute widths
+    # Compute widths: (batch, dim, K) -> (batch, dim, K)
     widths = jax.nn.softmax(unnormalized_widths, axis=-1)
     widths = min_bin_width + (1 - min_bin_width * num_bins) * widths
     cumwidths = jnp.cumsum(widths, axis=-1)
-    cumwidths = jnp.pad(cumwidths, ((0, 0), (1, 0)), mode='constant', constant_values=0.0)
+    cumwidths = jnp.pad(cumwidths, ((0, 0), (0, 0), (1, 0)), mode='constant', constant_values=0.0)
     cumwidths = (right - left) * cumwidths + left
-    cumwidths = cumwidths.at[:, 0].set(left)
-    cumwidths = cumwidths.at[:, -1].set(right)
-    widths = cumwidths[:, 1:] - cumwidths[:, :-1]
+    cumwidths = cumwidths.at[:, :, 0].set(left)
+    cumwidths = cumwidths.at[:, :, -1].set(right)
+    widths = cumwidths[..., 1:] - cumwidths[..., :-1]
 
     # Compute derivatives
     derivatives = min_derivative + jax.nn.softplus(unnormalized_derivatives)
@@ -107,21 +138,18 @@ def RQS(
     heights = jax.nn.softmax(unnormalized_heights, axis=-1)
     heights = min_bin_height + (1 - min_bin_height * num_bins) * heights
     cumheights = jnp.cumsum(heights, axis=-1)
-    cumheights = jnp.pad(cumheights, ((0, 0), (1, 0)), mode='constant', constant_values=0.0)
+    cumheights = jnp.pad(cumheights, ((0, 0), (0, 0), (1, 0)), mode='constant', constant_values=0.0)
     cumheights = (top - bottom) * cumheights + bottom
-    cumheights = cumheights.at[:, 0].set(bottom)
-    cumheights = cumheights.at[:, -1].set(top)
-    heights = cumheights[:, 1:] - cumheights[:, :-1]
+    cumheights = cumheights.at[:, :, 0].set(bottom)
+    cumheights = cumheights.at[:, :, -1].set(top)
+    heights = cumheights[..., 1:] - cumheights[..., :-1]
 
-    # Find bin indices - use lax.cond for the branch
-    def get_bin_idx_forward():
-        return searchsorted(cumwidths, inputs)[..., None]
-
-    def get_bin_idx_inverse():
-        return searchsorted(cumheights, inputs)[..., None]
-
-    # Note: inverse is a static argument, so this branch happens at trace time
-    bin_idx = get_bin_idx_inverse() if inverse else get_bin_idx_forward()
+    # Find bin indices
+    # inputs: (batch, dim), cumwidths/cumheights: (batch, dim, K+1)
+    if inverse:
+        bin_idx = searchsorted(cumheights, inputs)[..., None]  # (batch, dim, 1)
+    else:
+        bin_idx = searchsorted(cumwidths, inputs)[..., None]  # (batch, dim, 1)
 
     # Gather values for selected bins
     input_cumwidths = jnp.take_along_axis(cumwidths, bin_idx, axis=-1)[..., 0]
@@ -130,10 +158,10 @@ def RQS(
     delta = heights / widths
     input_delta = jnp.take_along_axis(delta, bin_idx, axis=-1)[..., 0]
     input_derivatives = jnp.take_along_axis(derivatives, bin_idx, axis=-1)[..., 0]
-    input_derivatives_plus_one = jnp.take_along_axis(derivatives[:, 1:], bin_idx, axis=-1)[..., 0]
+    input_derivatives_plus_one = jnp.take_along_axis(derivatives[..., 1:], bin_idx, axis=-1)[..., 0]
     input_heights = jnp.take_along_axis(heights, bin_idx, axis=-1)[..., 0]
 
-    # Compute transformation - inverse is static, so this branch happens at trace time
+    # Compute transformation
     if inverse:
         a = (((inputs - input_cumheights) *
               (input_derivatives + input_derivatives_plus_one - 2 * input_delta) +
@@ -198,37 +226,11 @@ class FCNN(nn.Module):
 
 
 # ============================================================================
-# Helper function for single RQS transformation (for vmap)
-# ============================================================================
-
-@partial(jit, static_argnums=(4, 5))
-def apply_rqs_single(
-        u: jax.Array,
-        w: jax.Array,
-        h: jax.Array,
-        d: jax.Array,
-        inverse: bool,
-        tail_bound: float
-) -> Tuple[jax.Array, jax.Array]:
-    """Apply RQS to a single sample (to be vmapped)"""
-    # Add batch dimension for compatibility with unconstrained_RQS
-    u_batch = u[None, :]
-    w_batch = w[None, :]
-    h_batch = h[None, :]
-    d_batch = d[None, :]
-
-    result, logdet = unconstrained_RQS(u_batch, w_batch, h_batch, d_batch, inverse, tail_bound)
-
-    # Remove batch dimension
-    return result[0], logdet[0]
-
-
-# ============================================================================
 # Neural Spline Flow Coupling Layer
 # ============================================================================
 
 class NSF_CL(nn.Module):
-    """Neural Spline Flow coupling layer - optimized with vmap"""
+    """Neural Spline Flow coupling layer"""
     dim: int
     hidden_dim: int
     K: int = 5
@@ -252,24 +254,20 @@ class NSF_CL(nn.Module):
         lower, upper = x[:, :self.dim // 2], x[:, self.dim // 2:]
 
         # Transform upper given lower
+        # f1 output: (batch, (3K-1) * upper_dim)
         out = self.f1(lower).reshape(-1, self.dim - self.dim // 2, 3 * self.K - 1)
-        W, H, D = jnp.split(out, [self.K, 2*self.K], axis=2)
+        # out: (batch, upper_dim, 3K-1)
+        W, H, D = jnp.split(out, [self.K, 2 * self.K], axis=2)
+        # W, H: (batch, upper_dim, K), D: (batch, upper_dim, K-1)
 
-        # Vectorize over batch dimension
-        upper, ld = vmap(
-            partial(apply_rqs_single, inverse=False, tail_bound=self.B),
-            in_axes=(0, 0, 0, 0)
-        )(upper, W, H, D)
+        upper, ld = unconstrained_RQS(upper, W, H, D, inverse=False, tail_bound=self.B)
         log_det = log_det + jnp.sum(ld, axis=1)
 
         # Transform lower given upper
         out = self.f2(upper).reshape(-1, self.dim // 2, 3 * self.K - 1)
-        W, H, D = jnp.split(out, [self.K, 2*self.K], axis=2)
+        W, H, D = jnp.split(out, [self.K, 2 * self.K], axis=2)
 
-        lower, ld = vmap(
-            partial(apply_rqs_single, inverse=False, tail_bound=self.B),
-            in_axes=(0, 0, 0, 0)
-        )(lower, W, H, D)
+        lower, ld = unconstrained_RQS(lower, W, H, D, inverse=False, tail_bound=self.B)
         log_det = log_det + jnp.sum(ld, axis=1)
 
         return jnp.concatenate([lower, upper], axis=1), log_det
@@ -289,22 +287,16 @@ class NSF_CL(nn.Module):
 
         # Inverse transform lower given upper
         out = self.f2(upper).reshape(-1, self.dim // 2, 3 * self.K - 1)
-        W, H, D = jnp.split(out, [self.K, 2*self.K], axis=2)
+        W, H, D = jnp.split(out, [self.K, 2 * self.K], axis=2)
 
-        lower, ld = vmap(
-            partial(apply_rqs_single, inverse=True, tail_bound=self.B),
-            in_axes=(0, 0, 0, 0)
-        )(lower, W, H, D)
+        lower, ld = unconstrained_RQS(lower, W, H, D, inverse=True, tail_bound=self.B)
         log_det = log_det + jnp.sum(ld, axis=1)
 
         # Inverse transform upper given lower
         out = self.f1(lower).reshape(-1, self.dim - self.dim // 2, 3 * self.K - 1)
-        W, H, D = jnp.split(out, [self.K, 2*self.K], axis=2)
+        W, H, D = jnp.split(out, [self.K, 2 * self.K], axis=2)
 
-        upper, ld = vmap(
-            partial(apply_rqs_single, inverse=True, tail_bound=self.B),
-            in_axes=(0, 0, 0, 0)
-        )(upper, W, H, D)
+        upper, ld = unconstrained_RQS(upper, W, H, D, inverse=True, tail_bound=self.B)
         log_det = log_det + jnp.sum(ld, axis=1)
 
         return jnp.concatenate([lower, upper], axis=1), log_det
@@ -318,7 +310,6 @@ class RealNVP(nn.Module):
     """Normalizing Flow using Neural Spline Flows
 
     Maps between latent space β ∈ [-1,1]^d and standard Gaussian z ~ N(0,I).
-    Optimized with vmap and jit.
     """
     dim: int
     num_flows: int = 3
@@ -348,11 +339,9 @@ class RealNVP(nn.Module):
         """
         log_det_total = jnp.zeros(x.shape[0])
 
-        # Python loop unrolls at trace time - this is fine
         for i, flow in enumerate(self.flows):
             x, log_det = flow(x)
             log_det_total = log_det_total + log_det
-            # Static control flow - i is known at trace time
             if i < len(self.flows) - 1:
                 x = x[:, self.perm]
 
@@ -370,9 +359,7 @@ class RealNVP(nn.Module):
         """
         log_det_total = jnp.zeros(z.shape[0])
 
-        # Python loop unrolls at trace time - this is fine
         for i, flow in enumerate(reversed(self.flows)):
-            # Static control flow - i is known at trace time
             if i > 0:
                 z = z[:, self.perm]
             z, log_det = flow.inverse(z)

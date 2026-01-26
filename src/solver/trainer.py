@@ -189,14 +189,16 @@ class IGNOTrainer:
                 # Get RNG for this step
                 self.train_state['rng'], step_rng = random.split(self.train_state['rng'])
 
-                # Training step (JIT-compiled)
-                self.train_state, metrics = train_step_fn(
-                    self.train_state,
+                new_params, new_opt_states, metrics = train_step_fn(
+                    self.train_state['params'],
+                    self.train_state['opt_states'],
                     batch_a,
                     batch_u,
                     batch_x,
                     step_rng
                 )
+                self.train_state['params'] = new_params
+                self.train_state['opt_states'] = new_opt_states
 
                 loss_sum += float(metrics['loss'])
                 pde_sum += float(metrics['loss_pde'])
@@ -281,47 +283,39 @@ class IGNOTrainer:
         }
 
     def _create_train_step(self, cfg):
-        """Create JIT-compiled training step
-
-        This is the core optimization - entire training step is JIT-compiled.
-        """
+        """Create JIT-compiled training step"""
         problem = self.problem
         weights = cfg.loss_weights
 
+        # Keep optimizers outside JIT - access via closure
+        optimizers = self.train_state['optimizers']
+
         @jit
-        def train_step(state, batch_a, batch_u, batch_x, rng):
+        def train_step(params, opt_states, batch_a, batch_u, batch_x, rng):
             """Single training step (JIT-compiled)
 
             Args:
-                state: Training state dict
+                params: Model parameters dict
+                opt_states: Optimizer states dict
                 batch_a: Coefficient field (batch, n_points, 1)
                 batch_u: Solution field (batch, n_points, 1)
                 batch_x: Coordinates (batch, n_points, 2)
                 rng: PRNG key
 
             Returns:
-                (updated_state, metrics)
+                (new_params, new_opt_states, metrics)
             """
-            params = state['params']
-
-            # Split RNG for different loss components
             rng_pde, rng_enc = random.split(rng)
 
             def loss_fn(params_dict):
                 """Combined loss function"""
-                # Encode to get beta
                 beta = problem.models['enc'].apply(
                     {'params': params_dict['enc']},
                     batch_a
                 )
-
-                # PDE loss (pass rng for collocation point generation)
                 loss_pde = problem.loss_pde(params_dict, batch_a, rng_pde)
-
-                # Data loss
                 loss_data = problem.loss_data(params_dict, batch_x, batch_a, batch_u)
 
-                # NF loss on DETACHED beta (stop_gradient)
                 beta_detached = jax.lax.stop_gradient(beta)
                 loss_nf = problem.models['nf'].apply(
                     {'params': params_dict['nf']},
@@ -329,9 +323,7 @@ class IGNOTrainer:
                     method=problem.models['nf'].loss
                 )
 
-                # Total loss
                 total_loss = weights.pde * loss_pde + weights.data * loss_data + loss_nf
-
                 return total_loss, {
                     'loss': total_loss,
                     'loss_pde': loss_pde,
@@ -339,34 +331,20 @@ class IGNOTrainer:
                     'loss_nf': loss_nf,
                 }
 
-            # Compute gradients
             (loss, metrics), grads = value_and_grad(loss_fn, has_aux=True)(params)
 
-            # Update parameters for each model
             new_params = {}
             new_opt_states = {}
-
             for name in params.keys():
-                # Apply optimizer
-                updates, new_opt_state = state['optimizers'][name].update(
+                updates, new_opt_state = optimizers[name].update(
                     grads[name],
-                    state['opt_states'][name],
+                    opt_states[name],
                     params[name]
                 )
-                # Apply updates
                 new_params[name] = optax.apply_updates(params[name], updates)
                 new_opt_states[name] = new_opt_state
 
-            # Update state
-            new_state = {
-                'params': new_params,
-                'opt_states': new_opt_states,
-                'optimizers': state['optimizers'],
-                'step': state['step'],
-                'rng': rng,
-            }
-
-            return new_state, metrics
+            return new_params, new_opt_states, metrics
 
         return train_step
 

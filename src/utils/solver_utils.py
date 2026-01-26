@@ -84,20 +84,8 @@ def get_optimizer(
         optimizer_config,
         learning_rate: float = None,
         clip_grad_norm: float = 10.0,
-        error_on_nonfinite: bool = True
 ) -> optax.GradientTransformation:
-    """Create optax optimizer with gradient clipping
-
-    Args:
-        optimizer_config: Config object with type, lr, weight_decay
-        learning_rate: Override learning rate (or use schedule)
-        clip_grad_norm: Max gradient norm for clipping
-        error_on_nonfinite: If True, raises error on NaN/Inf gradients
-                           If False, clips silently (default JAX behavior)
-
-    Returns:
-        Optax gradient transformation
-    """
+    """Create optax optimizer with gradient clipping"""
 
     lr = learning_rate if learning_rate is not None else optimizer_config.lr
 
@@ -121,30 +109,11 @@ def get_optimizer(
     else:
         opt = OPTIMIZERS[optimizer_type](learning_rate=lr)
 
-    # Build chain with gradient clipping
-    transforms = []
-
-    # Optional: Check for NaN/Inf before clipping
-    if error_on_nonfinite:
-        # Custom transform that checks for non-finite values
-        def check_finite(updates, state, params=None):
-            finite = jax.tree_util.tree_all(
-                jax.tree_util.tree_map(lambda x: jnp.all(jnp.isfinite(x)), updates)
-            )
-            # This will cause NaN in the updates if any are non-finite
-            # which will propagate and be visible in loss
-            updates = jax.tree_util.tree_map(
-                lambda x: jnp.where(finite, x, jnp.full_like(x, jnp.nan)),
-                updates
-            )
-            return updates, state
-
-        transforms.append(optax.stateless(check_finite))
-
-    transforms.append(optax.clip_by_global_norm(clip_grad_norm))
-    transforms.append(opt)
-
-    return optax.chain(*transforms)
+    # Chain with gradient clipping (no finite check - can't work in JIT)
+    return optax.chain(
+        optax.clip_by_global_norm(clip_grad_norm),
+        opt
+    )
 
 
 def get_scheduler(

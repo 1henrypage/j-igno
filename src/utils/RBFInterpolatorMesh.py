@@ -55,7 +55,6 @@ class RadialFun:
 
 # Pure functional versions that can be vmapped
 
-@jit
 def kernel_matrix_single(x_eps: jnp.ndarray, x_eps_base: jnp.ndarray, kernel_fn) -> jnp.ndarray:
     """Compute kernel matrix for a single sample
 
@@ -89,8 +88,6 @@ def polynomial_matrix_single(x_hat: jnp.ndarray, powers: jnp.ndarray) -> jnp.nda
     return jnp.prod(x_, axis=-1)
 
 
-# Vectorize over batch dimension
-kernel_matrix_batched = vmap(kernel_matrix_single, in_axes=(0, None, None))
 polynomial_matrix_batched = vmap(polynomial_matrix_single, in_axes=(0, None))
 
 
@@ -234,26 +231,54 @@ class RBFInterpolator:
         assert x.ndim == 3 and a_batch.ndim == 3
         assert a_batch.shape[1] == self.n_mesh
 
+        # Capture constants in closure to avoid tracing issues
+        lhs = self.lhs
+        n_mesh = self.n_mesh
+        n_monos = self.n_monos
+        x_eps_mesh = self.x_eps_mesh
+        kernel_fun = self.kernel_fun
+        powers = self.powers
+        shift = self.shift
+        scale = self.scale
+        eps = self.eps
+
+        def solve_single(a_values):
+            """Solve for single sample - n_mesh/n_monos captured via closure"""
+            rhs = jnp.zeros((n_mesh + n_monos, 1), dtype=a_values.dtype)
+            rhs = rhs.at[:n_mesh, :].set(a_values)
+            return jnp.linalg.solve(lhs, rhs)
+
+        def kernel_single(x_e):
+            """Kernel matrix for single sample"""
+            distances = jnp.linalg.norm(x_e[:, None, :] - x_eps_mesh[None, :, :], axis=-1)
+            return kernel_fun(distances)
+
+        def poly_single(x_h):
+            """Polynomial matrix for single sample"""
+            x_ = x_h[:, None, :] ** powers[None, :, :]
+            return jnp.prod(x_, axis=-1)
+
         # Solve for coefficients (vectorized over batch)
-        coeff = solve_rbf_system_batched(self.lhs, a_batch, self.n_mesh, self.n_monos)
+        coeff = vmap(solve_single)(a_batch)
 
         # Prepare query points
-        x_eps = x * self.eps
-        x_hat = (x - self.shift) / self.scale
+        x_eps = x * eps
+        x_hat = (x - shift) / scale
 
         # Compute kernel matrix (vectorized over batch)
-        kv = kernel_matrix_batched(x_eps, self.x_eps_mesh, self.kernel_fun)
+        kv = vmap(kernel_single)(x_eps)
 
         # Compute polynomial matrix (vectorized over batch)
-        pmat = polynomial_matrix_batched(x_hat, self.powers)
+        pmat = vmap(poly_single)(x_hat)
 
         # Concatenate
         vec = jnp.concatenate([kv, pmat], axis=-1)
 
         # Interpolate (vectorized over batch)
-        a_pred = interpolate_batched(vec, coeff)
+        a_pred = vmap(lambda v, c: v @ c)(vec, coeff)
 
         return a_pred
+
 
     def build(self):
         """Build the linear equation (done once at init)"""

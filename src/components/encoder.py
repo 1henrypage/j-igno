@@ -1,4 +1,6 @@
 # src/components/encoder.py
+# Encoder components for JAX/Flax
+# NOTE: JAX Conv uses channels-LAST: (batch, height, width, channels)
 
 import jax
 import jax.numpy as jnp
@@ -71,16 +73,7 @@ class EncoderFCNet_VAE(nn.Module):
         )
 
     def reparam(self, rng: jax.Array, mu: jax.Array, log_var: jax.Array) -> jax.Array:
-        """Reparameterization trick
-
-        Args:
-            rng: PRNG key
-            mu: Mean
-            log_var: Log variance
-
-        Returns:
-            Sample from N(mu, exp(log_var))
-        """
+        """Reparameterization trick"""
         std = jnp.exp(0.5 * log_var)
         eps = random.normal(rng, log_var.shape)
         return mu + std * eps
@@ -91,36 +84,25 @@ class EncoderFCNet_VAE(nn.Module):
             x: jax.Array,
             rng: jax.Array = None
     ) -> Tuple[jax.Array, jax.Array, jax.Array]:
-        """Encode with VAE
-
-        Args:
-            x: Input (n_batch, n_points, in_size)
-            rng: PRNG key for sampling
-
-        Returns:
-            beta: Sample (n_batch, n_latent)
-            mu: Mean (n_batch, n_latent)
-            log_var: Log variance (n_batch, n_latent)
-        """
-        # Flatten: (n_batch, n_points, in_size) -> (n_batch, n_points*in_size)
+        """Encode with VAE"""
         x = x.reshape(x.shape[0], -1)
-
-        # Get mu and log_var
         mu = self.net_mu(x)
         log_var = self.net_log_var(x)
 
-        # Sample using reparameterization
         if rng is not None:
             beta = self.reparam(rng, mu, log_var)
         else:
-            # During inference, just use mean
             beta = mu
 
         return beta, mu, log_var
 
 
 class EncoderCNNet1d(nn.Module):
-    """1D CNN encoder"""
+    """1D CNN encoder
+
+    PyTorch expects: (batch, channels, length) - permutes input
+    JAX expects: (batch, length, channels) - input already correct
+    """
     conv_arch: list[int]
     fc_arch: list[int]
     activation_conv: str | Callable
@@ -146,20 +128,25 @@ class EncoderCNNet1d(nn.Module):
         """Encode 1D input
 
         Args:
-            x: Input (n_batch, mesh_size, in_channel)
+            x: Input (n_batch, mesh_size, in_channel) - already channels-last
 
         Returns:
             beta: Latent code (n_batch, latent_dim)
         """
-        # Note: JAX Conv expects (batch, length, channels)
-        # PyTorch expects (batch, channels, length)
-        # Input is already in correct format for JAX
+        # Input is already (batch, length, channels) - correct for JAX
+        # No permute needed (unlike PyTorch which needs permute(0, 2, 1))
         x = self.net(x)
         return x
 
 
 class EncoderCNNet2d(nn.Module):
-    """2D CNN encoder"""
+    """2D CNN encoder
+
+    Input: (n_batch, ny*nx, in_channel) - flattened spatial with channels
+
+    PyTorch reshapes to: (batch, channels, ny, nx) - channels FIRST
+    JAX reshapes to: (batch, ny, nx, channels) - channels LAST
+    """
     conv_arch: list[int]
     fc_arch: list[int]
     activation_conv: str | Callable
@@ -192,9 +179,16 @@ class EncoderCNNet2d(nn.Module):
         Returns:
             beta: Latent code (n_batch, latent_dim)
         """
-        # Reshape to 2D grid
+        # Reshape to 2D grid with channels LAST (JAX convention)
         # Input: (n_batch, ny*nx, in_channel)
-        # Output for Conv2d: (n_batch, ny, nx, in_channel)
+        # Output: (n_batch, ny, nx, in_channel)
+        #
+        # PyTorch does:
+        #   x.permute(0, 2, 1)  -> (batch, ch, ny*nx)
+        #   x.reshape(-1, ch, ny, nx)  -> (batch, ch, ny, nx) channels FIRST
+        #
+        # JAX does:
+        #   x.reshape(-1, ny, nx, ch)  -> (batch, ny, nx, ch) channels LAST
         x = x.reshape(-1, self.ny_size, self.nx_size, self.in_channel)
         x = self.net(x)
         return x
