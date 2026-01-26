@@ -17,7 +17,7 @@ dependencies = [
     "pytest>=9.0.2",
     "scienceplots>=2.2.0",
     "scipy>=1.17.0",
-    "tensorboard>=2.20.0",
+    "tensorboardx>=2.6.4",
     "tqdm>=4.67.1",
 ]
 

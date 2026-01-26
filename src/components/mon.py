@@ -402,4 +402,6 @@ def create_vmapped_branch_forward(branch_net, act_fn):
         return a
 
     # Vmap over the batch dimension (axis 0)
-    return vmap(branch_forward, in_axes=0)
+
+
+    return vmap(branch_forward, in_axes=4)
