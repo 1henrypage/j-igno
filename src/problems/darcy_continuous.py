@@ -352,7 +352,7 @@ class DarcyContinuous(ProblemInstance):
             raise FileNotFoundError(f"Data path not found: {path}")
 
 
-        data = h5py.File(path=path, mode='r')
+        data = h5py.File(path, mode='r')
 
         a = np2jax(np.array(data["coeff"]).T, self.dtype)
         u = np2jax(np.array(data["sol"]).T, self.dtype)
