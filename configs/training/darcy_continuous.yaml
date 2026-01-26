@@ -1,13 +1,12 @@
 
 run_name: "darcy_continuous"
-device: "cuda"
 artifact_root: "runs"
 seed: 10086
 
 problem:
   type: "darcy_continuous"
-  train_data: "data/darcy_continuous/smh_train/"
-  test_data: "data/darcy_continuous/smh_test_in/"
+  train_data: "./data/darcy_continuous/smh_train.mat"
+  test_data: "./data/darcy_continuous/smh_test_in.mat"
 
 #pretrained:
 #  path: "./runs/2026-01-22_16-18-13_darcy_continuous/weights/best.pt"
