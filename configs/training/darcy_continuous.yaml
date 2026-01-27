@@ -15,7 +15,7 @@ problem:
 training:
   epochs: 12500
   batch_size: 50
-  epoch_show: 1
+  epoch_show: 50
 
   # Loss weights for PDE and data terms
   # Note: NF loss doesn't need a weight (gradients don't flow to encoder/decoders)
