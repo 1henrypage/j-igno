@@ -10,6 +10,11 @@ from typing import Tuple, Callable
 from .activation import FunActivation
 from .fcn import FCNet
 
+from jax.nn.initializers import variance_scaling, uniform
+
+_pytorch_conv_kernel_init = variance_scaling(1.0/3.0, "fan_in", "uniform")
+_pytorch_conv_bias_init = uniform(scale=0.1)
+
 
 class CNNPure1d(nn.Module):
     """1D CNN - expects input (batch, length, channels)"""
@@ -34,6 +39,8 @@ class CNNPure1d(nn.Module):
                 strides=(self.stride,),
                 dtype=self.dtype,
                 padding='VALID',
+                kernel_init=_pytorch_conv_kernel_init,
+                bias_init=_pytorch_conv_bias_init,
                 name=f'conv_{i}'
             )
             for i, out_channels in enumerate(self.conv_arch[1:])
@@ -123,6 +130,8 @@ class CNNPure2d(nn.Module):
                 strides=(self.stride, self.stride),
                 dtype=self.dtype,
                 padding='VALID',
+                kernel_init=_pytorch_conv_kernel_init,
+                bias_init=_pytorch_conv_bias_init,
                 name=f'conv_{i}'
             )
             for i, out_channels in enumerate(self.conv_arch[1:])

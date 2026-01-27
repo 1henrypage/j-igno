@@ -11,6 +11,11 @@ from functools import partial
 
 from .activation import FunActivation
 
+from jax.nn.initializers import variance_scaling, uniform
+
+_pytorch_kernel_init = variance_scaling(1.0/3.0, "fan_in", "uniform")
+_pytorch_bias_init = uniform(scale=0.1)
+
 
 class MultiONetBatch(nn.Module):
     """Multi-Output Operator Network with batch processing
@@ -43,16 +48,40 @@ class MultiONetBatch(nn.Module):
             self.act_branch = self.activation_branch
 
         # Trunk network layers
-        self.fc_trunk_in = nn.Dense(self.trunk_layers[0], dtype=self.dtype, name='trunk_in')
+        self.fc_trunk_in = nn.Dense(
+            self.trunk_layers[0],
+            dtype=self.dtype,
+            kernel_init=_pytorch_kernel_init,
+            bias_init=_pytorch_bias_init,
+            name='trunk_in'
+        )
         self.trunk_net = [
-            nn.Dense(hidden, dtype=self.dtype, name=f'trunk_{i}')
+            nn.Dense(
+                hidden,
+                dtype=self.dtype,
+                kernel_init=_pytorch_kernel_init,
+                bias_init=_pytorch_bias_init,
+                name=f'trunk_{i}'
+            )
             for i, hidden in enumerate(self.trunk_layers[1:])
         ]
 
         # Branch network layers
-        self.fc_branch_in = nn.Dense(self.branch_layers[0], dtype=self.dtype, name='branch_in')
+        self.fc_branch_in = nn.Dense(
+            self.branch_layers[0],
+            dtype=self.dtype,
+            kernel_init=_pytorch_kernel_init,
+            bias_init=_pytorch_bias_init,
+            name='branch_in'
+        )
         self.branch_net = [
-            nn.Dense(hidden, dtype=self.dtype, name=f'branch_{i}')
+            nn.Dense(
+                hidden,
+                dtype=self.dtype,
+                kernel_init=_pytorch_kernel_init,
+                bias_init=_pytorch_bias_init,
+                name=f'branch_{i}'
+            )
             for i, hidden in enumerate(self.branch_layers[1:])
         ]
 
@@ -141,21 +170,39 @@ class MultiONetBatch_X(nn.Module):
             self.act_branch = self.activation_branch
 
         # Trunk network
-        self.fc_trunk_in = nn.Dense(self.trunk_layers[0], dtype=self.dtype, name='trunk_in')
+        self.fc_trunk_in = nn.Dense(
+            self.trunk_layers[0],
+            dtype=self.dtype,
+            kernel_init=_pytorch_kernel_init,
+            bias_init=_pytorch_bias_init,
+            name='trunk_in'
+        )
         self.trunk_net = [
-            nn.Dense(hidden, dtype=self.dtype, name=f'trunk_{i}')
+            nn.Dense(
+                hidden,
+                dtype=self.dtype,
+                kernel_init=_pytorch_kernel_init,
+                bias_init=_pytorch_bias_init,
+                name=f'trunk_{i}'
+            )
             for i, hidden in enumerate(self.trunk_layers[1:])
         ]
 
         # Branch network
-        self.fc_branch_in = nn.Dense(self.branch_layers[0], dtype=self.dtype, name='branch_in')
+        self.fc_branch_in = nn.Dense(
+            self.branch_layers[0],
+            dtype=self.dtype,
+            kernel_init=_pytorch_kernel_init,
+            bias_init=_pytorch_bias_init,
+            name='branch_in'
+        )
         self.branch_net = [
-            nn.Dense(hidden, dtype=self.dtype, name=f'branch_{i}')
+            nn.Dense(hidden, dtype=self.dtype, kernel_init=_pytorch_kernel_init, bias_init=_pytorch_bias_init, name=f'branch_{i}')
             for i, hidden in enumerate(self.branch_layers[1:])
         ]
 
         # Output layer
-        self.fc_out = nn.Dense(self.out_size, dtype=self.dtype, name='out')
+        self.fc_out = nn.Dense(self.out_size, dtype=self.dtype, kernel_init=_pytorch_kernel_init, bias_init=_pytorch_bias_init, name='out')
 
     @nn.compact
     def __call__(self, x: jax.Array, a: jax.Array) -> jax.Array:
@@ -226,16 +273,16 @@ class MultiONetCartesianProd(nn.Module):
             self.act_branch = self.activation_branch
 
         # Trunk network
-        self.fc_trunk_in = nn.Dense(self.trunk_layers[0], dtype=self.dtype, name='trunk_in')
+        self.fc_trunk_in = nn.Dense(self.trunk_layers[0], dtype=self.dtype, kernel_init=_pytorch_kernel_init, bias_init=_pytorch_bias_init, name='trunk_in')
         self.trunk_net = [
-            nn.Dense(hidden, dtype=self.dtype, name=f'trunk_{i}')
+            nn.Dense(hidden, dtype=self.dtype, kernel_init=_pytorch_kernel_init, bias_init=_pytorch_bias_init, name=f'trunk_{i}')
             for i, hidden in enumerate(self.trunk_layers[1:])
         ]
 
         # Branch network
-        self.fc_branch_in = nn.Dense(self.branch_layers[0], dtype=self.dtype, name='branch_in')
+        self.fc_branch_in = nn.Dense(self.branch_layers[0], dtype=self.dtype, kernel_init=_pytorch_kernel_init, bias_init=_pytorch_bias_init, name='branch_in')
         self.branch_net = [
-            nn.Dense(hidden, dtype=self.dtype, name=f'branch_{i}')
+            nn.Dense(hidden, dtype=self.dtype, kernel_init=_pytorch_kernel_init, bias_init=_pytorch_bias_init, name=f'branch_{i}')
             for i, hidden in enumerate(self.branch_layers[1:])
         ]
 
@@ -317,21 +364,21 @@ class MultiONetCartesianProd_X(nn.Module):
             self.act_branch = self.activation_branch
 
         # Trunk network
-        self.fc_trunk_in = nn.Dense(self.trunk_layers[0], dtype=self.dtype, name='trunk_in')
+        self.fc_trunk_in = nn.Dense(self.trunk_layers[0], dtype=self.dtype, kernel_init=_pytorch_kernel_init, bias_init=_pytorch_bias_init, name='trunk_in')
         self.trunk_net = [
-            nn.Dense(hidden, dtype=self.dtype, name=f'trunk_{i}')
+            nn.Dense(hidden, dtype=self.dtype, kernel_init=_pytorch_kernel_init, bias_init=_pytorch_bias_init, name=f'trunk_{i}')
             for i, hidden in enumerate(self.trunk_layers[1:])
         ]
 
         # Branch network
-        self.fc_branch_in = nn.Dense(self.branch_layers[0], dtype=self.dtype, name='branch_in')
+        self.fc_branch_in = nn.Dense(self.branch_layers[0], dtype=self.dtype, kernel_init=_pytorch_kernel_init, bias_init=_pytorch_bias_init, name='branch_in')
         self.branch_net = [
-            nn.Dense(hidden, dtype=self.dtype, name=f'branch_{i}')
+            nn.Dense(hidden, dtype=self.dtype, kernel_init=_pytorch_kernel_init, bias_init=_pytorch_bias_init, name=f'branch_{i}')
             for i, hidden in enumerate(self.branch_layers[1:])
         ]
 
         # Output layer
-        self.fc_out = nn.Dense(self.out_size, dtype=self.dtype, name='out')
+        self.fc_out = nn.Dense(self.out_size, dtype=self.dtype, kernel_init=_pytorch_kernel_init, bias_init=_pytorch_bias_init, name='out')
 
     @nn.compact
     def __call__(self, x: jax.Array, a: jax.Array) -> jax.Array:

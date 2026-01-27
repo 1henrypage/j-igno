@@ -6,6 +6,12 @@ from flax import linen as nn
 from typing import List, Callable
 from .activation import FunActivation
 
+from jax.nn.initializers import variance_scaling, uniform
+
+# Define PyTorch-compatible initializers
+_pytorch_kernel_init = variance_scaling(1.0/3.0, "fan_in", "uniform")
+_pytorch_bias_init = uniform(scale=0.1)
+
 
 class FCNet(nn.Module):
     """Fully connected network with activation functions
@@ -25,7 +31,13 @@ class FCNet(nn.Module):
 
         # Create layers
         self.layers = [
-            nn.Dense(out_features, dtype=self.dtype, name=f'layer_{i}')
+            nn.Dense(
+                out_features,
+                dtype=self.dtype,
+                kernel_init=_pytorch_kernel_init,
+                bias_init=_pytorch_bias_init,
+                name=f'layer_{i}'
+            )
             for i, (in_features, out_features) in enumerate(
                 zip(self.layers_list[:-1], self.layers_list[1:])
             )

@@ -441,14 +441,11 @@ class DarcyContinuous(ProblemInstance):
             rng: jax.Array
     ) -> jnp.ndarray:
         """PDE residual loss during training
-
         Uses RBF interpolator on TRUE coefficient field.
-
         Args:
             params: Model parameters
             a: Coefficient field (batch, n_points, 1)
             rng: PRNG key
-
         Returns:
             PDE loss (scalar)
         """
@@ -459,7 +456,6 @@ class DarcyContinuous(ProblemInstance):
         beta = self.models['enc'].apply({'params': params['enc']}, a)
 
         # Generate collocation points
-        # FIXED: Pass key explicitly for JIT compatibility
         rng, subkey = random.split(rng)
         xc, R = self.genPoint.weight_centers(
             n_center=nc,
