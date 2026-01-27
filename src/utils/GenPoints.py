@@ -259,7 +259,7 @@ def weight_centers_lhs(
     lb = jnp.array(x_lb)
     ub = jnp.array(x_ub)
 
-    key1, key2, key3 = random.split(key, 3)
+    key1, key2, key3, key4, key5 = random.split(key, 5)
     R = random.uniform(key1, shape=(n_center, 1), minval=R_min, maxval=R_max)
 
     # Adjust bounds based on radius
@@ -273,13 +273,13 @@ def weight_centers_lhs(
     # For dimension 0
     intervals_0 = jnp.arange(n_center)
     perm_0 = random.permutation(key2, intervals_0)
-    u_0 = random.uniform(key2, shape=(n_center,))
+    u_0 = random.uniform(key3, shape=(n_center,))
     samples_0 = (perm_0 + u_0) / n_center  # in [0, 1]
 
     # For dimension 1
     intervals_1 = jnp.arange(n_center)
-    perm_1 = random.permutation(key3, intervals_1)
-    u_1 = random.uniform(key3, shape=(n_center,))
+    perm_1 = random.permutation(key4, intervals_1)
+    u_1 = random.uniform(key5, shape=(n_center,))
     samples_1 = (perm_1 + u_1) / n_center  # in [0, 1]
 
     # Stack and scale to bounds
@@ -515,7 +515,7 @@ class Point2D:
             R_max: float = 1e-4,
             R_min: float = 1e-4,
             key: Optional[jax.Array] = None,
-            use_lhs: bool = True
+            use_lhs: bool = False
     ) -> Tuple[jnp.ndarray, jnp.ndarray]:
         """Generate centers of compact support regions
 
