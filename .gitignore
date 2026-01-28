@@ -8,6 +8,8 @@
 *.vrb
 *.fdb_latexmk
 *.fls
+*.sif
+*.pyc
 *.DS_Store
 
 data/**/*.mat
