@@ -2,11 +2,11 @@
 #SBATCH --job-name=jigno
 #SBATCH --partition=general,insy
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=48G
+#SBATCH --cpus-per-task=2
+#SBATCH --mem=32G
 #SBATCH --gres=gpu:a40:1
-#SBATCH --output=slurm_logs/job_%j.out
-#SBATCH --error=slurm_logs/job_%j.err
+#SBATCH --output=/tmp/slurm_job_%j.out
+#SBATCH --error=/tmp/slurm_job_%j.err
 #SBATCH --mail-type=END,FAIL
 #SBATCH --mail-user=h.page@student.tudelft.nl
 # =============================================================================
@@ -17,13 +17,20 @@
 
 set -euo pipefail
 
-MODE="${1:?Usage: run.sh <train|evaluate> <config> [args...]}"
-CONFIG="${2:?Usage: run.sh <train|evaluate> <config> [args...]}"
-shift 2
+# Copy logs back to project dir when job ends (success or failure)
+cleanup() {
+    cp /tmp/slurm_job_${SLURM_JOB_ID}.out "${PROJECT_DIR}/slurm_logs/" 2>/dev/null || true
+    cp /tmp/slurm_job_${SLURM_JOB_ID}.err "${PROJECT_DIR}/slurm_logs/" 2>/dev/null || true
+}
+trap cleanup EXIT
 
 # Get project directory (where this script lives)
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR"
+
+MODE="${1:?Usage: run.sh <train|evaluate> <config> [args...]}"
+CONFIG="${2:?Usage: run.sh <train|evaluate> <config> [args...]}"
+shift 2
 
 echo "Job ID: ${SLURM_JOB_ID:-local}"
 echo "Node: $(hostname)"
