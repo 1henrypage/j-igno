@@ -1,8 +1,4 @@
 # src/problems/darcy_continuous.py
-# Darcy Flow in JAX with fixes:
-# 1. FIXED: Mollifier now adds dimension like PyTorch version
-# 2. FIXED: weight_centers called with key parameter
-# 3. IMPROVED: More efficient batched gradient computation option
 
 """
 Darcy Flow Continuous problem in JAX.
@@ -427,6 +423,54 @@ class DarcyContinuous(ProblemInstance):
             'u': model_u,
             'a': model_a,
             'nf': model_nf,
+        }
+
+    # =========================================================================
+    # NEW: Model configuration methods for trainer
+    # =========================================================================
+
+    def get_sample_inputs(self, batch_size: int) -> Dict[str, Dict[str, jax.Array]]:
+        """Return sample inputs for each model for initialization.
+
+        Args:
+            batch_size: Batch size for sample inputs
+
+        Returns:
+            Dict mapping model name -> sample inputs dict
+        """
+        # Get sample data
+        if self.train_data:
+            sample_a = self.train_data['a'][:batch_size]
+            sample_x = self.train_data['x'][:batch_size]
+        else:
+            # Fallback for evaluation-only mode
+            sample_a = self.test_data['a'][:batch_size]
+            sample_x = self.test_data['x'][:batch_size]
+
+        sample_beta = jnp.ones((batch_size, self.BETA_SIZE), dtype=self.dtype)
+
+        return {
+            'enc': {'x': sample_a},
+            'u': {'x': sample_x, 'a': sample_beta},
+            'a': {'x': sample_x, 'a': sample_beta},
+            'nf': {'x': sample_beta},
+        }
+
+    def get_weight_decay_groups(self) -> Dict[str, bool]:
+        """Return dict mapping model name -> whether it should have weight decay.
+
+        For IGNO:
+        - Decoders ('a', 'u') get weight decay
+        - Encoder and NF don't get weight decay
+
+        Returns:
+            Dict mapping model name -> True if should have weight decay
+        """
+        return {
+            'enc': False,
+            'u': True,
+            'a': True,
+            'nf': False,
         }
 
     # =========================================================================

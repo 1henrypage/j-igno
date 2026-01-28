@@ -1,18 +1,15 @@
 # src/solver/trainer.py
-# JAX trainer with JIT-compiled training step
-# Fixes:
-# 1. Updated to work with fixed GenPoints (key passing)
-# 2. Improved NF diagnostics
-# 3. Better documentation
-
 """
-IGNO Trainer for JAX.
+IGNO Trainer for JAX
 
-Key differences from PyTorch:
-- Training step is JIT-compiled
-- Uses functional updates (no mutable state)
-- Optimizer states handled via optax
-- NF trained with stop_gradient (JAX equivalent of .detach())
+This trainer works with any ProblemInstance that implements the required interface:
+- get_sample_inputs(batch_size) -> sample inputs for model initialization
+- get_weight_decay_groups() -> which models get weight decay
+- get_batch_keys() -> which data keys to batch
+- compute_training_losses(params, batch, rng, loss_weights) -> losses
+- compute_eval_metrics(params, batch) -> evaluation metrics
+- run_diagnostics(epoch, params, sample_data, logger) -> diagnostics
+
 """
 
 import jax
@@ -20,7 +17,7 @@ import jax.numpy as jnp
 from jax import random, jit, value_and_grad
 import optax
 import time
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 from tqdm import trange
 from datetime import datetime
 from pathlib import Path
@@ -35,10 +32,10 @@ from src.utils.solver_utils import create_train_state, create_data_batches
 
 class IGNOTrainer:
     """
-    JAX trainer for IGNO: encoder + decoders + NF jointly.
+    JAX trainer for IGNO - Model Agnostic Version.
 
+    Works with any ProblemInstance that implements the required interface.
     Training loop is JIT-compiled for maximum performance.
-    NF trained with stop_gradient on latents (prevents gradients to encoder).
     """
 
     def __init__(self, problem: ProblemInstance):
@@ -93,20 +90,14 @@ class IGNOTrainer:
         self._setup_directories()
         self._setup_tensorboard()
 
+        cfg = config.training
+
+        # Get sample inputs from problem (not hardcoded!)
+        sample_inputs = self.problem.get_sample_inputs(cfg.batch_size)
+
         # Initialize model parameters if not already done
         if not self.problem.params:
             print("Initializing model parameters...")
-            # Create sample inputs for initialization
-            sample_a = self.problem.train_data['a'][:1]
-            sample_x = self.problem.train_data['x'][:1]
-            sample_beta = jnp.ones((1, self.problem.BETA_SIZE))
-
-            sample_inputs = {
-                'enc': {'x': sample_a},
-                'u': {'x': sample_x, 'a': sample_beta},
-                'a': {'x': sample_x, 'a': sample_beta},
-                'nf': {'x': sample_beta},
-            }
             self.problem.initialize_models(sample_inputs)
 
         # Load pretrained if specified
@@ -117,29 +108,26 @@ class IGNOTrainer:
             print(f"Loading pretrained: {ckpt_path}")
             self.problem.load_checkpoint(ckpt_path)
 
+        # Calculate number of steps
+        batch_keys = self.problem.get_batch_keys()
+        first_key = batch_keys[0]
+        n_train_samples = len(self.problem.train_data[first_key])
+        batches_per_epoch = (n_train_samples + cfg.batch_size - 1) // cfg.batch_size
+        num_steps = cfg.epochs * batches_per_epoch
+
+        # Get weight decay groups from problem (not hardcoded!)
+        weight_decay_groups = self.problem.get_weight_decay_groups()
+
         # Create training state
-        cfg = config.training
-        num_steps = cfg.epochs * (len(self.problem.train_data['a']) // cfg.batch_size)
-
-        # Sample inputs for optimizer initialization
-        sample_a = self.problem.train_data['a'][:cfg.batch_size]
-        sample_x = self.problem.train_data['x'][:cfg.batch_size]
-        sample_u = self.problem.train_data['u'][:cfg.batch_size]
-
-        sample_inputs = {
-            'enc': {'x': sample_a},
-            'u': {'x': sample_x, 'a': jnp.ones((cfg.batch_size, self.problem.BETA_SIZE))},
-            'a': {'x': sample_x, 'a': jnp.ones((cfg.batch_size, self.problem.BETA_SIZE))},
-            'nf': {'x': jnp.ones((cfg.batch_size, self.problem.BETA_SIZE))},
-        }
-
         self.train_state = create_train_state(
             models=self.problem.models,
             rng=self.problem.rng,
             sample_inputs=sample_inputs,
+            weight_decay_groups=weight_decay_groups,
             optimizer_config=cfg.optimizer,
             scheduler_config=cfg.scheduler,
-            num_steps=num_steps
+            num_steps=num_steps,
+            epochs=cfg.epochs,  # FIXED: Pass epochs for scheduler conversion
         )
 
         # Update problem params with initialized params
@@ -155,6 +143,9 @@ class IGNOTrainer:
         train_data = self.problem.get_train_data()
         test_data = self.problem.get_test_data()
 
+        # Get batch keys from problem
+        batch_keys = self.problem.get_batch_keys()
+
         # Create JIT-compiled training and evaluation functions
         train_step_fn = self._create_train_step(cfg)
         eval_step_fn = self._create_eval_step()
@@ -167,13 +158,18 @@ class IGNOTrainer:
         print("=" * 60)
         print(f"Loss weights: pde={cfg.loss_weights.pde}, data={cfg.loss_weights.data}")
         print(f"Epochs: {cfg.epochs}, Batch size: {cfg.batch_size}")
+        print(f"Models: {list(self.problem.models.keys())}")
+        print(f"Weight decay groups: {self.problem.get_weight_decay_groups()}")
         print("=" * 60 + "\n")
 
         for epoch in trange(cfg.epochs, desc="Training"):
             # Create batches for this epoch
             self.train_state['rng'], data_rng = random.split(self.train_state['rng'])
+
+            # Get arrays in order of batch_keys
+            train_arrays = [train_data[k] for k in batch_keys]
             train_batches, n_train = create_data_batches(
-                train_data['a'], train_data['u'], train_data['x'],
+                *train_arrays,
                 batch_size=cfg.batch_size,
                 shuffle=True,
                 rng=data_rng
@@ -185,16 +181,17 @@ class IGNOTrainer:
             data_sum = 0.
             nf_sum = 0.
 
-            for batch_a, batch_u, batch_x in train_batches:
+            for batch_tuple in train_batches:
+                # Convert tuple to dict
+                batch = {k: v for k, v in zip(batch_keys, batch_tuple)}
+
                 # Get RNG for this step
                 self.train_state['rng'], step_rng = random.split(self.train_state['rng'])
 
                 new_params, new_opt_states, metrics = train_step_fn(
                     self.train_state['params'],
                     self.train_state['opt_states'],
-                    batch_a,
-                    batch_u,
-                    batch_x,
+                    batch,
                     step_rng
                 )
                 self.train_state['params'] = new_params
@@ -209,8 +206,9 @@ class IGNOTrainer:
             self.problem.params = self.train_state['params']
 
             # Evaluation
+            test_arrays = [test_data[k] for k in batch_keys]
             test_batches, n_test = create_data_batches(
-                test_data['a'], test_data['u'], test_data['x'],
+                *test_arrays,
                 batch_size=cfg.batch_size,
                 shuffle=False
             )
@@ -218,12 +216,11 @@ class IGNOTrainer:
             error_sum = 0.
             test_nf_sum = 0.
 
-            for batch_a, batch_u, batch_x in test_batches:
+            for batch_tuple in test_batches:
+                batch = {k: v for k, v in zip(batch_keys, batch_tuple)}
                 metrics = eval_step_fn(
                     self.train_state['params'],
-                    batch_a,
-                    batch_u,
-                    batch_x
+                    batch
                 )
                 error_sum += float(metrics['error'])
                 test_nf_sum += float(metrics['nf_loss'])
@@ -253,15 +250,22 @@ class IGNOTrainer:
                     metric_name='error'
                 )
 
-            # Print progress
+            # Print progress and run diagnostics
             if (epoch + 1) % cfg.epoch_show == 0:
                 print(f"\nEpoch {epoch + 1}:")
                 print(f"  Loss: {avg_loss:.4f} (pde={pde_sum / n_train:.4f}, "
                       f"data={data_sum / n_train:.4f}, nf={avg_nf:.4f})")
                 print(f"  Test Error: {avg_error:.4f}, Test NF NLL: {avg_test_nf:.4f}")
 
-                # NF diagnostics
-                self._run_nf_diagnostics(epoch, train_data['a'][:cfg.batch_size])
+                # Run problem-specific diagnostics
+                # Get first batch for diagnostics
+                first_batch = {k: train_data[k][:cfg.batch_size] for k in batch_keys}
+                self.problem.run_diagnostics(
+                    epoch=epoch,
+                    params=self.train_state['params'],
+                    sample_data=first_batch,
+                    logger=self._log
+                )
 
             self.train_state['step'] += 1
 
@@ -291,45 +295,25 @@ class IGNOTrainer:
         optimizers = self.train_state['optimizers']
 
         @jit
-        def train_step(params, opt_states, batch_a, batch_u, batch_x, rng):
+        def train_step(params, opt_states, batch, rng):
             """Single training step (JIT-compiled)
 
             Args:
                 params: Model parameters dict
                 opt_states: Optimizer states dict
-                batch_a: Coefficient field (batch, n_points, 1)
-                batch_u: Solution field (batch, n_points, 1)
-                batch_x: Coordinates (batch, n_points, 2)
+                batch: Dict with batch data (keys from get_batch_keys())
                 rng: PRNG key
 
             Returns:
                 (new_params, new_opt_states, metrics)
             """
-            rng_pde, rng_enc = random.split(rng)
 
             def loss_fn(params_dict):
-                """Combined loss function"""
-                beta = problem.models['enc'].apply(
-                    {'params': params_dict['enc']},
-                    batch_a
+                """Combined loss function - delegates to problem"""
+                total_loss, metrics = problem.compute_training_losses(
+                    params_dict, batch, rng, weights
                 )
-                loss_pde = problem.loss_pde(params_dict, batch_a, rng_pde)
-                loss_data = problem.loss_data(params_dict, batch_x, batch_a, batch_u)
-
-                beta_detached = jax.lax.stop_gradient(beta)
-                loss_nf = problem.models['nf'].apply(
-                    {'params': params_dict['nf']},
-                    beta_detached,
-                    method=problem.models['nf'].loss
-                )
-
-                total_loss = weights.pde * loss_pde + weights.data * loss_data + loss_nf
-                return total_loss, {
-                    'loss': total_loss,
-                    'loss_pde': loss_pde,
-                    'loss_data': loss_data,
-                    'loss_nf': loss_nf,
-                }
+                return total_loss, metrics
 
             (loss, metrics), grads = value_and_grad(loss_fn, has_aux=True)(params)
 
@@ -353,100 +337,19 @@ class IGNOTrainer:
         problem = self.problem
 
         @jit
-        def eval_step(params, batch_a, batch_u, batch_x):
-            """Single evaluation step (JIT-compiled)"""
-            # Compute error
-            error = problem.error(params, batch_x, batch_a, batch_u)
+        def eval_step(params, batch):
+            """Single evaluation step (JIT-compiled)
 
-            # Compute NF loss
-            beta = problem.models['enc'].apply({'params': params['enc']}, batch_a)
-            nf_loss = problem.models['nf'].apply(
-                {'params': params['nf']},
-                beta,
-                method=problem.models['nf'].loss
-            )
+            Args:
+                params: Model parameters dict
+                batch: Dict with batch data
 
-            return {
-                'error': jnp.mean(error),
-                'nf_loss': nf_loss,
-            }
+            Returns:
+                Dict with evaluation metrics
+            """
+            return problem.compute_eval_metrics(params, batch)
 
         return eval_step
-
-    def _run_nf_diagnostics(self, epoch: int, a_sample: jnp.ndarray) -> None:
-        """Detailed monitoring of NF health
-
-        Checks:
-        - Z-space statistics (should be ~N(0,1))
-        - Dead dimensions (std < 0.1)
-        - Invertibility (roundtrip error)
-        - Log-det stability
-        """
-        nf = self.problem.models['nf']
-        enc = self.problem.models['enc']
-        params = self.train_state['params']
-
-        # Get latents
-        beta = enc.apply({'params': params['enc']}, a_sample)
-
-        # Forward through NF: beta -> z
-        z_out, log_det_fwd = nf.apply(
-            {'params': params['nf']},
-            beta,
-            method=nf.__call__
-        )
-
-        # Stats for Z-space (should be close to N(0,1))
-        z_mean_total = float(jnp.mean(z_out))
-        z_std_total = float(jnp.std(z_out))
-        z_std_per_dim = jnp.std(z_out, axis=0)
-        dead_dims = int(jnp.sum(z_std_per_dim < 0.1))
-        exploding_dims = int(jnp.sum(z_std_per_dim > 5.0))
-
-        # Invertibility check: beta -> z -> beta_rec
-        beta_rec, _ = nf.apply(
-            {'params': params['nf']},
-            z_out,
-            method=nf.inverse
-        )
-        rec_err = float(jnp.mean(jnp.abs(beta - beta_rec)))
-
-        # Log-det analysis
-        ldj_mean = float(jnp.mean(log_det_fwd))
-        ldj_std = float(jnp.std(log_det_fwd))
-
-        # Logging to TensorBoard
-        self._log("nf_health/z_mean_avg", z_mean_total, epoch)
-        self._log("nf_health/z_std_avg", z_std_total, epoch)
-        self._log("nf_health/dead_dims", float(dead_dims), epoch)
-        self._log("nf_health/exploding_dims", float(exploding_dims), epoch)
-        self._log("nf_health/rec_error_abs", rec_err, epoch)
-        self._log("nf_health/log_det_mean", ldj_mean, epoch)
-        self._log("nf_health/log_det_std", ldj_std, epoch)
-
-        # Console output
-        print(f"  [NF Health] Roundtrip Err: {rec_err:.2e} | "
-              f"Dead Dims: {dead_dims}/{z_out.shape[1]} | "
-              f"Exploding Dims: {exploding_dims}/{z_out.shape[1]}")
-        print(f"  [NF Health] Z-Space: Mean={z_mean_total:.3f}, Std={z_std_total:.3f} | "
-              f"LogDet: mean={ldj_mean:.2f}, std={ldj_std:.2f}")
-
-        # Warnings
-        if dead_dims > (z_out.shape[1] // 2):
-            print("  ⚠️ WARNING: High number of dead dimensions detected. "
-                  "Flow might be collapsing.")
-        if exploding_dims > 0:
-            print("  ⚠️ WARNING: Exploding dimensions detected. "
-                  "Check for numerical instability.")
-        if rec_err > 1e-3:
-            print("  ⚠️ WARNING: Poor invertibility. "
-                  "Check for vanishing/exploding gradients in NF.")
-        if abs(z_mean_total) > 0.5:
-            print("  ⚠️ WARNING: Z-space mean far from 0. "
-                  "Flow may not be mapping to standard normal.")
-        if z_std_total < 0.5 or z_std_total > 2.0:
-            print("  ⚠️ WARNING: Z-space std far from 1. "
-                  "Flow may not be mapping to standard normal.")
 
     def close(self) -> None:
         """Cleanup resources"""

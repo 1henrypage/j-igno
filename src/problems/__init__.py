@@ -1,8 +1,5 @@
 # src/problems/__init__.py
-# JAX version - streamlined without standardization
-# Fixes:
-# 1. Added sample_latent_from_nf and log_prob_latent methods back (needed for Bayesian inference)
-# 2. Better documentation
+# JAX version - refactored for model-agnostic trainer
 
 """
 Problem instances for JAX.
@@ -12,6 +9,7 @@ Each problem:
 - Builds models (Flax modules)
 - Defines JIT-compiled loss functions
 - Handles checkpoints
+- Provides sample inputs and weight decay configuration for trainer
 """
 
 from abc import ABC, abstractmethod
@@ -105,7 +103,7 @@ class ProblemInstance(ABC):
         self.init_loss()
 
     # =========================================================================
-    # Model building
+    # Model building and configuration (NEW - for model-agnostic trainer)
     # =========================================================================
 
     @abstractmethod
@@ -113,9 +111,55 @@ class ProblemInstance(ABC):
         """Build ALL models for this problem.
 
         Returns:
-            Dict with keys like 'enc', 'u', 'a', 'nf'
+            Dict with keys like 'enc', 'u', 'a', 'nf' (problem-specific)
         """
         raise NotImplementedError
+
+    @abstractmethod
+    def get_sample_inputs(self, batch_size: int) -> Dict[str, Dict[str, jax.Array]]:
+        """Return sample inputs for each model for initialization.
+
+        This allows each problem to define its own model structure without
+        the trainer needing to know about specific model names or input shapes.
+
+        Args:
+            batch_size: Batch size to use for sample inputs
+
+        Returns:
+            Dict mapping model name -> dict of sample inputs
+            Example for DarcyContinuous:
+                {
+                    'enc': {'x': sample_a},
+                    'u': {'x': sample_x, 'a': sample_beta},
+                    'a': {'x': sample_x, 'a': sample_beta},
+                    'nf': {'x': sample_beta},
+                }
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def get_weight_decay_groups(self) -> Dict[str, bool]:
+        """Return dict mapping model name -> whether it should have weight decay.
+
+        This allows each problem to specify which models should have weight decay
+        without hardcoding in the trainer.
+
+        Returns:
+            Dict mapping model name -> True if should have weight decay
+            Example:
+                {'enc': False, 'u': True, 'a': True, 'nf': False}
+        """
+        raise NotImplementedError
+
+    def get_batch_keys(self) -> List[str]:
+        """Return keys to extract from train_data for batching.
+
+        Override if problem needs different data keys.
+
+        Returns:
+            List of keys to extract from train_data/test_data
+        """
+        return ['a', 'u', 'x']
 
     def initialize_models(
             self,
@@ -139,6 +183,200 @@ class ProblemInstance(ABC):
     def _count_params(self, params) -> int:
         """Count parameters in pytree"""
         return sum(x.size for x in jax.tree_util.tree_leaves(params))
+
+    # =========================================================================
+    # Training interface (NEW - for model-agnostic trainer)
+    # =========================================================================
+
+    def compute_training_losses(
+            self,
+            params: Dict[str, Any],
+            batch: Dict[str, jnp.ndarray],
+            rng: jax.Array,
+            loss_weights: Any
+    ) -> Tuple[jnp.ndarray, Dict[str, jnp.ndarray]]:
+        """Compute all training losses for a batch.
+
+        This is the main training interface that the trainer calls.
+        Default implementation uses loss_pde, loss_data, and NF loss.
+        Override for problems with different loss structure.
+
+        Args:
+            params: All model parameters
+            batch: Dict with batch data (keys from get_batch_keys())
+            rng: PRNG key
+            loss_weights: Loss weight configuration (has .pde, .data attributes)
+
+        Returns:
+            (total_loss, metrics_dict) where metrics_dict has individual losses
+        """
+        # Default implementation for IGNO-style training
+        a = batch['a']
+        u = batch['u']
+        x = batch['x']
+
+        # Encode a -> beta (needed for NF loss)
+        beta = self.models['enc'].apply({'params': params['enc']}, a)
+
+        # PDE loss
+        loss_pde = self.loss_pde(params, a, rng)
+
+        # Data/reconstruction loss
+        loss_data = self.loss_data(params, x, a, u)
+
+        # NF loss on DETACHED beta (key insight: gradients don't flow to encoder)
+        beta_detached = jax.lax.stop_gradient(beta)
+        loss_nf = self.models['nf'].apply(
+            {'params': params['nf']},
+            beta_detached,
+            method=self.models['nf'].loss
+        )
+
+        # Total loss
+        total_loss = loss_weights.pde * loss_pde + loss_weights.data * loss_data + loss_nf
+
+        metrics = {
+            'loss': total_loss,
+            'loss_pde': loss_pde,
+            'loss_data': loss_data,
+            'loss_nf': loss_nf,
+        }
+
+        return total_loss, metrics
+
+    def compute_eval_metrics(
+            self,
+            params: Dict[str, Any],
+            batch: Dict[str, jnp.ndarray],
+    ) -> Dict[str, jnp.ndarray]:
+        """Compute evaluation metrics for a batch.
+
+        Args:
+            params: All model parameters
+            batch: Dict with batch data
+
+        Returns:
+            Dict with evaluation metrics
+        """
+        a = batch['a']
+        u = batch['u']
+        x = batch['x']
+
+        # Compute error
+        error = self.error(params, x, a, u)
+
+        # Compute NF loss
+        beta = self.models['enc'].apply({'params': params['enc']}, a)
+        nf_loss = self.models['nf'].apply(
+            {'params': params['nf']},
+            beta,
+            method=self.models['nf'].loss
+        )
+
+        return {
+            'error': jnp.mean(error),
+            'nf_loss': nf_loss,
+        }
+
+    def run_diagnostics(
+            self,
+            epoch: int,
+            params: Dict[str, Any],
+            sample_data: Dict[str, jnp.ndarray],
+            logger: Callable[[str, float, int], None]
+    ) -> None:
+        """Run problem-specific diagnostics.
+
+        Default implementation: NF health check.
+        Override for problems needing different diagnostics.
+
+        Args:
+            epoch: Current epoch
+            params: Model parameters
+            sample_data: Sample data for diagnostics (e.g., first batch)
+            logger: Logging function (tag, value, step) -> None
+        """
+        self._run_nf_diagnostics(epoch, params, sample_data['a'], logger)
+
+    def _run_nf_diagnostics(
+            self,
+            epoch: int,
+            params: Dict[str, Any],
+            a_sample: jnp.ndarray,
+            logger: Callable[[str, float, int], None]
+    ) -> None:
+        """Detailed monitoring of NF health
+
+        Checks:
+        - Z-space statistics (should be ~N(0,1))
+        - Dead dimensions (std < 0.1)
+        - Invertibility (roundtrip error)
+        - Log-det stability
+        """
+        nf = self.models['nf']
+        enc = self.models['enc']
+
+        # Get latents
+        beta = enc.apply({'params': params['enc']}, a_sample)
+
+        # Forward through NF: beta -> z
+        z_out, log_det_fwd = nf.apply(
+            {'params': params['nf']},
+            beta,
+            method=nf.__call__
+        )
+
+        # Stats for Z-space (should be close to N(0,1))
+        z_mean_total = float(jnp.mean(z_out))
+        z_std_total = float(jnp.std(z_out))
+        z_std_per_dim = jnp.std(z_out, axis=0)
+        dead_dims = int(jnp.sum(z_std_per_dim < 0.1))
+        exploding_dims = int(jnp.sum(z_std_per_dim > 5.0))
+
+        # Invertibility check: beta -> z -> beta_rec
+        beta_rec, _ = nf.apply(
+            {'params': params['nf']},
+            z_out,
+            method=nf.inverse
+        )
+        rec_err = float(jnp.mean(jnp.abs(beta - beta_rec)))
+
+        # Log-det analysis
+        ldj_mean = float(jnp.mean(log_det_fwd))
+        ldj_std = float(jnp.std(log_det_fwd))
+
+        # Logging to TensorBoard
+        logger("nf_health/z_mean_avg", z_mean_total, epoch)
+        logger("nf_health/z_std_avg", z_std_total, epoch)
+        logger("nf_health/dead_dims", float(dead_dims), epoch)
+        logger("nf_health/exploding_dims", float(exploding_dims), epoch)
+        logger("nf_health/rec_error_abs", rec_err, epoch)
+        logger("nf_health/log_det_mean", ldj_mean, epoch)
+        logger("nf_health/log_det_std", ldj_std, epoch)
+
+        # Console output
+        print(f"  [NF Health] Roundtrip Err: {rec_err:.2e} | "
+              f"Dead Dims: {dead_dims}/{z_out.shape[1]} | "
+              f"Exploding Dims: {exploding_dims}/{z_out.shape[1]}")
+        print(f"  [NF Health] Z-Space: Mean={z_mean_total:.3f}, Std={z_std_total:.3f} | "
+              f"LogDet: mean={ldj_mean:.2f}, std={ldj_std:.2f}")
+
+        # Warnings
+        if dead_dims > (z_out.shape[1] // 2):
+            print("  ⚠️ WARNING: High number of dead dimensions detected. "
+                  "Flow might be collapsing.")
+        if exploding_dims > 0:
+            print("  ⚠️ WARNING: Exploding dimensions detected. "
+                  "Check for numerical instability.")
+        if rec_err > 1e-3:
+            print("  ⚠️ WARNING: Poor invertibility. "
+                  "Check for vanishing/exploding gradients in NF.")
+        if abs(z_mean_total) > 0.5:
+            print("  ⚠️ WARNING: Z-space mean far from 0. "
+                  "Flow may not be mapping to standard normal.")
+        if z_std_total < 0.5 or z_std_total > 2.0:
+            print("  ⚠️ WARNING: Z-space std far from 1. "
+                  "Flow may not be mapping to standard normal.")
 
     # =========================================================================
     # Checkpoint management
@@ -204,7 +442,6 @@ class ProblemInstance(ABC):
 
     # =========================================================================
     # NF-related methods (for Bayesian inference)
-    # These are needed for MCMC sampling even without standardization
     # =========================================================================
 
     def sample_latent_from_nf(
