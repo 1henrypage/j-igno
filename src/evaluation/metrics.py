@@ -11,6 +11,8 @@ Also includes standard relative L2.
 import jax.numpy as jnp
 from typing import Dict, List
 
+from utils.Losses import MyError
+
 
 def rmse(pred: jnp.ndarray, true: jnp.ndarray) -> float:
     """
@@ -35,20 +37,12 @@ def rmse(pred: jnp.ndarray, true: jnp.ndarray) -> float:
 
 def relative_l2(pred: jnp.ndarray, true: jnp.ndarray, p: int = 2) -> float:
     """
-    Relative Lp error.
+    Relative L_p error
 
     rel_L2 = ||pred - true||_p / ||true||_p
     """
-    pred_flat = pred.flatten().astype(jnp.float32)
-    true_flat = true.flatten().astype(jnp.float32)
-
-    diff_norm = jnp.linalg.norm(pred_flat - true_flat, ord=p)
-    true_norm = jnp.linalg.norm(true_flat, ord=p)
-
-    # Handle zero denominator
-    safe_denom = jnp.where(true_norm < 1e-10, 1e-10, true_norm)
-
-    return float(diff_norm / safe_denom)
+    error_fn = MyError(d=2, p=p, size_average=True, reduction=True)
+    return float(error_fn.Lp_rel(pred, true))
 
 
 def cross_correlation(pred: jnp.ndarray, true: jnp.ndarray) -> float:
