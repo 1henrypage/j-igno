@@ -461,10 +461,11 @@ class ProblemInstance(ABC):
             beta: Latent samples (num_samples, latent_dim)
         """
         nf = self.models['nf']
+        # Note: nf.sample signature is (rng, num_samples)
         return nf.apply(
             {'params': params['nf']},
-            num_samples,
             rng,
+            num_samples,
             method=nf.sample
         )
 
