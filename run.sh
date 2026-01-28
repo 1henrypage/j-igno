@@ -17,6 +17,9 @@
 
 set -euo pipefail
 
+# Get project directory (where this script lives) - needed for cleanup trap
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Copy logs back to project dir when job ends (success or failure)
 cleanup() {
     cp /tmp/slurm_job_${SLURM_JOB_ID}.out "${PROJECT_DIR}/slurm_logs/" 2>/dev/null || true
@@ -24,8 +27,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Get project directory (where this script lives)
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJECT_DIR"
 
 MODE="${1:?Usage: run.sh <train|evaluate> <config> [args...]}"
