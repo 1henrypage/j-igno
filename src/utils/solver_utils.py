@@ -1,8 +1,4 @@
 # src/utils/solver_utils.py
-# JAX version with fixes:
-# 1. Added OneCycle scheduler support
-# 2. Improved gradient clipping with NaN detection option
-# 3. Better documentation
 
 import jax
 import jax.numpy as jnp
@@ -82,7 +78,7 @@ def get_model(
 
 def get_optimizer(
         optimizer_config,
-        learning_rate: float = None,
+        learning_rate: Union[float, optax.Schedule] = None,
         clip_grad_norm: float = 10.0,
 ) -> optax.GradientTransformation:
     """Create optax optimizer with gradient clipping"""
@@ -119,14 +115,18 @@ def get_optimizer(
 def get_scheduler(
         scheduler_config,
         optimizer_config,
-        num_steps: int
+        num_steps: int,
+        epochs: int,
 ) -> Optional[optax.Schedule]:
     """Create learning rate schedule
+
+    FIXED: Now properly converts epoch-based parameters to optimizer steps.
 
     Args:
         scheduler_config: Config with type and parameters
         optimizer_config: Config with base learning rate
-        num_steps: Total number of training steps
+        num_steps: Total number of training steps (epochs * batches_per_epoch)
+        epochs: Total number of epochs (needed for epoch->step conversion)
 
     Returns:
         Optax schedule or None
@@ -137,10 +137,17 @@ def get_scheduler(
 
     base_lr = optimizer_config.lr
 
+    # Compute steps per epoch for conversion
+    steps_per_epoch = num_steps // epochs if epochs > 0 else 1
+
     if scheduler_config.type == 'StepLR':
+        # FIXED: Convert epoch-based step_size to optimizer steps
+        # PyTorch StepLR uses epochs, optax uses steps
+        step_size_in_steps = scheduler_config.step_size * steps_per_epoch
+
         return optax.exponential_decay(
             init_value=base_lr,
-            transition_steps=scheduler_config.step_size,
+            transition_steps=step_size_in_steps,
             decay_rate=scheduler_config.gamma,
             staircase=True
         )
@@ -151,7 +158,6 @@ def get_scheduler(
             alpha=scheduler_config.eta_min / base_lr if scheduler_config.eta_min else 0.0
         )
     elif scheduler_config.type == 'OneCycle':
-        # FIXED: Added OneCycle scheduler support
         # OneCycle: warmup to max_lr, then decay
         return optax.schedules.warmup_cosine_decay_schedule(
             init_value=base_lr / scheduler_config.div_factor,
@@ -175,20 +181,26 @@ def create_train_state(
         models: Dict[str, nn.Module],
         rng: jax.Array,
         sample_inputs: Dict[str, Dict[str, jax.Array]],
+        weight_decay_groups: Dict[str, bool],
         optimizer_config,
         scheduler_config=None,
         num_steps: int = None,
+        epochs: int = None,
         clip_grad_norm: float = 10.0
 ) -> Dict:
     """Initialize all model parameters and optimizer states
+
+    REFACTORED: Now accepts weight_decay_groups from problem instead of hardcoding.
 
     Args:
         models: Dict of Flax modules
         rng: PRNG key
         sample_inputs: Dict mapping model names to sample input dicts
+        weight_decay_groups: Dict mapping model name -> whether to apply weight decay
         optimizer_config: Optimizer configuration
         scheduler_config: Optional scheduler configuration
         num_steps: Total training steps (required if using scheduler)
+        epochs: Total epochs (required if using scheduler with epoch-based params)
         clip_grad_norm: Gradient clipping norm
 
     Returns:
@@ -201,7 +213,12 @@ def create_train_state(
     # Create schedule if needed
     schedule = None
     if scheduler_config is not None and num_steps is not None:
-        schedule = get_scheduler(scheduler_config, optimizer_config, num_steps)
+        schedule = get_scheduler(
+            scheduler_config,
+            optimizer_config,
+            num_steps,
+            epochs=epochs or 1  # Fallback to 1 to avoid division by zero
+        )
 
     # Initialize each model
     rng, *init_rngs = random.split(rng, len(models) + 1)
@@ -215,8 +232,10 @@ def create_train_state(
             raise ValueError(f"No sample input for model '{name}'")
 
         # Create optimizer for this model
-        # Decoders ('a', 'u') get weight decay, encoder/NF don't
-        if name in ['a', 'u']:
+        # Use weight_decay_groups to determine if model gets weight decay
+        use_weight_decay = weight_decay_groups.get(name, False)
+
+        if use_weight_decay:
             opt_config_copy = type(optimizer_config)(
                 type=optimizer_config.type,
                 lr=optimizer_config.lr,
