@@ -1,20 +1,23 @@
 #!/bin/bash
 # Build the container on DAIC (run on login node, not in SLURM job)
-# Everything stays within the project directory on bulk storage
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# Use project directory for cache to avoid home quota issues
-export APPTAINER_CACHEDIR="${SCRIPT_DIR}/.apptainer_cache"
-mkdir -p "$APPTAINER_CACHEDIR"
+# Use /tmp for cache - bulk storage doesn't support the chmod operations apptainer needs
+export APPTAINER_CACHEDIR="/tmp/apptainer_cache_${USER}"
+export APPTAINER_TMPDIR="/tmp/apptainer_tmp_${USER}"
+mkdir -p "$APPTAINER_CACHEDIR" "$APPTAINER_TMPDIR"
 
-echo "Building container in: $SCRIPT_DIR"
+echo "Building container..."
 echo "Cache dir: $APPTAINER_CACHEDIR"
+echo "Output: ${SCRIPT_DIR}/jigno.sif"
 
-apptainer build jigno.sif jigno.def
+apptainer build "${SCRIPT_DIR}/jigno.sif" "${SCRIPT_DIR}/jigno.def"
+
+# Clean up cache
+rm -rf "$APPTAINER_CACHEDIR" "$APPTAINER_TMPDIR"
 
 echo ""
 echo "Done: ${SCRIPT_DIR}/jigno.sif"
-echo "Add to .gitignore: jigno.sif, .apptainer_cache/"
