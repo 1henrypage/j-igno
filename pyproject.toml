@@ -14,6 +14,7 @@ dependencies = [
     "optax>=0.2.2",
     "pandas>=2.0.0",
     "pytest>=8.0.0",
+    "pyyaml>=6.0.3",
     "scienceplots>=2.1.0",
     "scipy>=1.12.0",
     "tensorboard>=2.20.0",
