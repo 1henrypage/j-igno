@@ -78,7 +78,7 @@ def get_model(
 
 def get_optimizer(
         optimizer_config,
-        learning_rate: float = None,
+        learning_rate: Union[float, optax.Schedule] = None,
         clip_grad_norm: float = 10.0,
 ) -> optax.GradientTransformation:
     """Create optax optimizer with gradient clipping"""
