@@ -1,8 +1,5 @@
 # src/utils/GenPoints.py
-# JAX version with fixes:
-# 1. Added `key` parameter to class methods for JIT compatibility
-# 2. Optional LHS sampling support
-# 3. Fixed all API mismatches
+# JAX version with JIT-compatible LHS sampling
 
 import jax
 import jax.numpy as jnp
@@ -100,7 +97,6 @@ def inner_point_sphere_mesh(
     grid = jnp.stack([x_mesh.reshape(-1), y_mesh.reshape(-1)], axis=1)
 
     # For JIT compatibility, we keep all points but zero out those outside
-    # If you need variable-size output, call this outside JIT
     mask = jnp.linalg.norm(grid, axis=1, keepdims=True) < 1.
     x = jnp.where(mask, grid, 0.0)
     return x * radius + xc
@@ -207,7 +203,7 @@ def boundary_point_sphere_mesh(
     return x * radius + xc
 
 
-@partial(jax.jit, static_argnums=(1, 4, 5))
+@partial(jax.jit, static_argnums=(1, 2, 3, 4, 5))
 def weight_centers_uniform(
         key: jax.Array,
         n_center: int,
@@ -239,58 +235,58 @@ def weight_centers_uniform(
     return xc.reshape(-1, 1, 2), R.reshape(-1, 1, 1)
 
 
+@partial(jax.jit, static_argnums=(1, 2, 3, 4, 5))
 def weight_centers_lhs(
-        key: jax.Array,
+        key: jax.array,
         n_center: int,
-        x_lb: Tuple[float, float],
-        x_ub: Tuple[float, float],
-        R_max: float = 1e-4,
-        R_min: float = 1e-4
-) -> Tuple[jnp.ndarray, jnp.ndarray]:
-    """Generate centers using Latin Hypercube Sampling - NOT JIT compatible
+        x_lb: tuple[float, float],
+        x_ub: tuple[float, float],
+        r_max: float = 1e-4,
+        r_min: float = 1e-4
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """generate centers using latin hypercube sampling - jit compatible
 
-    LHS provides better space coverage than uniform sampling.
-    Use this for better training results, but call outside JIT.
+    lhs provides better space coverage than uniform sampling.
+    each dimension is divided into n_center equal intervals, with exactly
+    one sample placed in each interval, then shuffled.
 
-    Returns:
+    returns:
         xc: size(n_center, 1, 2)
-        R: size(n_center, 1, 1)
+        r: size(n_center, 1, 1)
     """
     lb = jnp.array(x_lb)
     ub = jnp.array(x_ub)
 
     key1, key2, key3, key4, key5 = random.split(key, 5)
-    R = random.uniform(key1, shape=(n_center, 1), minval=R_min, maxval=R_max)
+    r = random.uniform(key1, shape=(n_center, 1), minval=r_min, maxval=r_max)
 
-    # Adjust bounds based on radius
-    lb_adj = lb + R
-    ub_adj = ub - R
+    # adjust bounds based on radius
+    lb_adj = lb + r
+    ub_adj = ub - r
 
-    # Latin Hypercube Sampling implementation
-    # Divide each dimension into n_center equal intervals
-    # Place one sample in each interval, then shuffle
+    # latin hypercube sampling implementation
+    # divide each dimension into n_center equal intervals
+    # place one sample in each interval, then shuffle
 
-    # For dimension 0
-    intervals_0 = jnp.arange(n_center)
-    perm_0 = random.permutation(key2, intervals_0)
+    # for dimension 0
+    perm_0 = random.permutation(key2, n_center)
     u_0 = random.uniform(key3, shape=(n_center,))
     samples_0 = (perm_0 + u_0) / n_center  # in [0, 1]
 
-    # For dimension 1
-    intervals_1 = jnp.arange(n_center)
-    perm_1 = random.permutation(key4, intervals_1)
+    # for dimension 1
+    perm_1 = random.permutation(key4, n_center)
     u_1 = random.uniform(key5, shape=(n_center,))
     samples_1 = (perm_1 + u_1) / n_center  # in [0, 1]
 
-    # Stack and scale to bounds
+    # stack and scale to bounds
     xc_unit = jnp.stack([samples_0, samples_1], axis=1)  # (n_center, 2) in [0,1]^2
     xc = xc_unit * (ub_adj - lb_adj) + lb_adj
 
-    return xc.reshape(-1, 1, 2), R.reshape(-1, 1, 1)
+    return xc.reshape(-1, 1, 2), r.reshape(-1, 1, 1)
 
 
-# Alias for backward compatibility - defaults to uniform (JIT-compatible)
-weight_centers = weight_centers_uniform
+# Default to LHS for better coverage (now JIT-compatible!)
+weight_centers = weight_centers_lhs
 
 
 @partial(jax.jit, static_argnums=(1,))
@@ -328,8 +324,6 @@ def integral_grid_variable(
 
 
 ######################################## Class-based API (backwards compatibility)
-# These classes now wrap the pure functional versions
-# FIXED: Added `key` parameter to all methods for JIT compatibility
 
 class Point1D:
     """Wrapper class for 1D point generation - maintains stateful key"""
@@ -377,7 +371,7 @@ class Point1D:
 class Point2D:
     """Wrapper class for 2D point generation - maintains stateful key
 
-    FIXED: All methods now accept optional `key` parameter for JIT compatibility.
+    All methods accept optional `key` parameter for JIT compatibility.
     When called from JIT-compiled code, pass the key explicitly.
     """
 
@@ -515,25 +509,23 @@ class Point2D:
             R_max: float = 1e-4,
             R_min: float = 1e-4,
             key: Optional[jax.Array] = None,
-            use_lhs: bool = False
+            use_lhs: bool = True  # Default to LHS for better coverage
     ) -> Tuple[jnp.ndarray, jnp.ndarray]:
         """Generate centers of compact support regions
-
-        FIXED: Now accepts `key` parameter for JIT compatibility.
 
         Args:
             n_center: Number of centers
             R_max: Maximum radius
             R_min: Minimum radius
             key: Optional PRNG key. If None, uses internal state.
-            use_lhs: If True, use Latin Hypercube Sampling (NOT JIT compatible)
-                     If False, use uniform sampling (JIT compatible)
+            use_lhs: If True, use Latin Hypercube Sampling (better coverage)
+                     If False, use uniform sampling
 
         Returns:
             xc: Centers, shape (n_center, 1, 2)
             R: Radii, shape (n_center, 1, 1)
         """
-                # Get key
+        # Get key
         if key is None:
             self.key, key = random.split(self.key)
 
@@ -570,10 +562,10 @@ class Point2D:
     def showPoint(self, point_dict: dict, title: str = ''):
         """Visualize the generated points"""
         fig = plt.figure(figsize=(9, 6))
-        for key in point_dict.keys():
-            x = point_dict[key][:, 0]
-            y = point_dict[key][:, 1]
-            plt.scatter(x, y, label=key)
+        for name in point_dict.keys():
+            x = point_dict[name][:, 0]
+            y = point_dict[name][:, 1]
+            plt.scatter(x, y, label=name, alpha=0.7)
         plt.xlabel('x')
         plt.ylabel('y')
         plt.title(title)
@@ -584,33 +576,55 @@ class Point2D:
 
 if __name__ == '__main__':
     # Test the implementation
+    print("Testing JIT compatibility of LHS...")
+
     key = random.PRNGKey(42)
 
-    # Test pure functional API
-    key, subkey = random.split(key)
-    xc, R = weight_centers_uniform(subkey, 100, (0., 0.), (1., 1.), 1e-4, 1e-4)
-    print(f"Uniform centers shape: {xc.shape}, R shape: {R.shape}")
+    # Test that LHS is JIT-compatible
+    @jax.jit
+    def test_lhs_in_jit(key):
+        return weight_centers_lhs(key, 100, (0., 0.), (1., 1.), 1e-4, 1e-4)
 
     key, subkey = random.split(key)
-    xc_lhs, R_lhs = weight_centers_lhs(subkey, 100, (0., 0.), (1., 1.), 1e-4, 1e-4)
-    print(f"LHS centers shape: {xc_lhs.shape}, R shape: {R_lhs.shape}")
+    xc_lhs, R_lhs = test_lhs_in_jit(subkey)
+    print(f"✓ LHS in JIT works! Shape: {xc_lhs.shape}")
+
+    # Test uniform for comparison
+    @jax.jit
+    def test_uniform_in_jit(key):
+        return weight_centers_uniform(key, 100, (0., 0.), (1., 1.), 1e-4, 1e-4)
+
+    key, subkey = random.split(key)
+    xc_uni, R_uni = test_uniform_in_jit(subkey)
+    print(f"✓ Uniform in JIT works! Shape: {xc_uni.shape}")
 
     # Test class API
+    print("\nTesting class API...")
     demo = Point2D(random_seed=42)
 
-    # With internal state
+    # With internal state (LHS by default now)
     xc1, R1 = demo.weight_centers(n_center=50)
-    print(f"Class API (internal key): {xc1.shape}")
+    print(f"✓ Class API (LHS, internal key): {xc1.shape}")
 
-    # With explicit key (JIT compatible)
+    # With explicit key
     key, subkey = random.split(key)
-    xc2, R2 = demo.weight_centers(n_center=50, key=subkey)
-    print(f"Class API (explicit key): {xc2.shape}")
+    xc2, R2 = demo.weight_centers(n_center=50, key=subkey, use_lhs=True)
+    print(f"✓ Class API (LHS, explicit key): {xc2.shape}")
 
-    # Visualize
-    grid = demo.integral_grid(n_mesh_or_grid=20, variable_size=True)
+    # Compare distributions visually
+    print("\nComparing LHS vs Uniform coverage...")
+    key, k1, k2 = random.split(key, 3)
+    xc_lhs_vis, _ = weight_centers_lhs(k1, 100, (0., 0.), (1., 1.), 1e-4, 1e-4)
+    xc_uni_vis, _ = weight_centers_uniform(k2, 100, (0., 0.), (1., 1.), 1e-4, 1e-4)
+
+    print(f"LHS points range: x=[{xc_lhs_vis[:, 0, 0].min():.3f}, {xc_lhs_vis[:, 0, 0].max():.3f}], "
+          f"y=[{xc_lhs_vis[:, 0, 1].min():.3f}, {xc_lhs_vis[:, 0, 1].max():.3f}]")
+    print(f"Uniform points range: x=[{xc_uni_vis[:, 0, 0].min():.3f}, {xc_uni_vis[:, 0, 0].max():.3f}], "
+          f"y=[{xc_uni_vis[:, 0, 1].min():.3f}, {xc_uni_vis[:, 0, 1].max():.3f}]")
+
     demo.showPoint({
-        'uniform_centers': xc.reshape(-1, 2),
-        'lhs_centers': xc_lhs.reshape(-1, 2),
-        'grid': grid
-    }, title='Point Generation Comparison')
+        'LHS': xc_lhs_vis.reshape(-1, 2),
+        'Uniform': xc_uni_vis.reshape(-1, 2),
+    }, title='LHS vs Uniform Sampling (100 points)')
+
+    print("\n✓ All tests passed!")
