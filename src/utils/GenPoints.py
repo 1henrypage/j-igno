@@ -237,7 +237,7 @@ def weight_centers_uniform(
 
 @partial(jax.jit, static_argnums=(1, 2, 3, 4, 5))
 def weight_centers_lhs(
-        key: jax.array,
+        key: jax.Array,
         n_center: int,
         x_lb: tuple[float, float],
         x_ub: tuple[float, float],
