@@ -47,6 +47,8 @@ nvidia-smi
 CONTAINER="${PROJECT_DIR}/jigno.sif"
 [[ ! -f "$CONTAINER" ]] && { echo "ERROR: container not found. Run ./build.sh first"; exit 1; }
 
+echo "WE HERE!"
+
 case "$MODE" in
     train)    SCRIPT="training.py" ;;
     evaluate) SCRIPT="evaluate.py" ;;
@@ -55,7 +57,7 @@ esac
 # -C isolates container filesystem
 # --nv enables GPU
 # --bind mounts project dir to /workspace
-srun apptainer exec --nv -C \
+apptainer exec --nv -C \
     --bind "${PROJECT_DIR}:/workspace" \
     --pwd /workspace \
     "$CONTAINER" \
