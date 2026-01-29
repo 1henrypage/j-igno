@@ -7,8 +7,7 @@ requires-python = ">=3.11,<3.12"
 dependencies = [
     "flax>=0.8.4",
     "h5py>=3.10.0",
-    "jax==0.4.26",
-    "jaxlib==0.4.26+cuda12.cudnn89",
+    "jax[cuda12]==0.4.26",
     "matplotlib>=3.8.0",
     "numpy>=1.26.0,<2.0",
     "optax>=0.2.2",
@@ -20,6 +19,15 @@ dependencies = [
     "tensorboardx>=2.6.0",
     "tqdm>=4.66.0",
 ]
+
+[tool.uv.sources]
+jax = { index = "jax" }
+jaxlib = { index = "jax" }
+
+[[tool.uv.index]]
+name = "jax"
+url = "https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"
+explicit = true
 
 [project.optional-dependencies]
 dev = [
