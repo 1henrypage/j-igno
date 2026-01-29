@@ -57,7 +57,7 @@ esac
 # -C isolates container filesystem
 # --nv enables GPU
 # --bind mounts project dir to /workspace
-srun apptainer exec --nv  \
+apptainer exec --nv -C \
     --bind "${PROJECT_DIR}:/workspace" \
     --pwd /workspace \
     "$CONTAINER" \
