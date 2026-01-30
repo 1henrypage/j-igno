@@ -20,18 +20,20 @@ dependencies = [
     "tqdm>=4.66.0",
 ]
 
-[tool.uv.sources]
-jax = { index = "jax" }
-jaxlib = { index = "jax" }
-
-[[tool.uv.index]]
-name = "jax"
-url = "https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"
-explicit = true
-
 [project.optional-dependencies]
 dev = [
-    "ipykernel>=6.29.0",
+    "ipykernel>=7.1.0",
     "jupyter>=1.0.0",
     "pytest>=8.0.0",
 ]
+
+[tool.uv.sources]
+# We only map jaxlib here.
+# 'jax' will be pulled from PyPI (standard),
+# which then triggers the search for 'jaxlib' on this index.
+jaxlib = { index = "jax-cuda" }
+
+[[tool.uv.index]]
+name = "jax-cuda"
+url = "https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"
+explicit = true
