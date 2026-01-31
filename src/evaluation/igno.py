@@ -1,11 +1,6 @@
 # src/evaluation/igno.py
 """
 IGNO-style gradient-based inversion in JAX.
-
-Given sparse noisy observations, optimize beta to minimize
-PDE loss + data loss, starting from NF sample.
-
-Supports batched inversion for processing multiple samples simultaneously.
 """
 import jax
 import jax.numpy as jnp
@@ -22,32 +17,11 @@ from src.solver.config import InversionConfig
 class IGNOInverter:
     """
     IGNO gradient-based inversion in JAX.
-
-    Process:
-    1. Sample z ~ N(0, I) for each sample in batch
-    2. Pass through NF inverse to get initial betas
-    3. Optimize betas via gradient descent on: w_pde * L_pde + w_data * L_data
-    4. Return optimized betas
-
-    Supports batched inversion where multiple independent samples are
-    optimized in parallel for significant speedup.
-
-    Note: In JAX, all models are already "frozen" since we use functional
-    updates - we simply don't update their parameters during inversion.
     """
 
     def __init__(self, problem: ProblemInstance, rng: jax.Array):
-        """
-        Initialize inverter.
-
-        Args:
-            problem: ProblemInstance with trained models and params
-            rng: PRNG key for sampling
-        """
         self.problem = problem
         self.rng = rng
-
-        # Store frozen params (we won't update these)
         self.frozen_params = problem.params
 
     def invert(
@@ -58,22 +32,6 @@ class IGNOInverter:
             config: InversionConfig,
             verbose: bool = False,
     ) -> jnp.ndarray:
-        """
-        Run gradient-based inversion on one or more samples.
-
-        Supports batched inversion where multiple independent samples are
-        optimized simultaneously for significant speedup.
-
-        Args:
-            x_obs: Observation coordinates (batch, n_obs, 2)
-            u_obs: Noisy observations (batch, n_obs, 1)
-            x_full: Full grid coordinates (batch, n_points, 2) - for PDE loss
-            config: Inversion configuration
-            verbose: Print progress
-
-        Returns:
-            Optimized beta (batch, latent_dim)
-        """
         batch_size = x_obs.shape[0]
 
         # Initialize: sample from NF prior
@@ -84,6 +42,17 @@ class IGNOInverter:
             rng=sample_rng
         )
 
+        # DEBUG: Initial beta stats
+        print("=" * 60)
+        print("JAX DEBUG - INVERSION START")
+        print("=" * 60)
+        print(f"Initial beta shape: {beta_init.shape}")
+        print(f"Initial beta mean: {float(jnp.mean(beta_init)):.6f}")
+        print(f"Initial beta std: {float(jnp.std(beta_init)):.6f}")
+        print(f"Initial beta min: {float(jnp.min(beta_init)):.6f}")
+        print(f"Initial beta max: {float(jnp.max(beta_init)):.6f}")
+        print(f"Initial beta: {beta_init}")
+
         # Create optimizer
         optimizer = self._create_optimizer(config)
         opt_state = optimizer.init(beta_init)
@@ -91,25 +60,31 @@ class IGNOInverter:
         # Get loss weights
         weights = config.loss_weights
 
-        # Create JIT-compiled update step
-        @jit
+        print(f"\nLoss weights: pde={weights.pde}, data={weights.data}")
+        print(f"Optimizer: {config.optimizer.type}, lr={config.optimizer.lr}")
+
+        # Create loss function (not JIT for debugging)
         def loss_fn(beta, rng_key):
             """Compute inversion loss."""
-            # PDE loss (uses decoded coefficient)
             loss_pde = self.problem.loss_pde_from_beta(
                 self.frozen_params, beta, rng_key
             )
-
-            # Data loss (predicted u at obs points vs observed u)
             loss_data = self.problem.loss_data_from_beta(
                 self.frozen_params, beta, x_obs, u_obs, target_type='u'
             )
-
-            # Total loss
             total_loss = weights.pde * loss_pde + weights.data * loss_data
-
             return total_loss, {'loss_pde': loss_pde, 'loss_data': loss_data}
 
+        # DEBUG: Compute initial losses
+        self.rng, init_rng = random.split(self.rng)
+        init_loss, init_aux = loss_fn(beta_init, init_rng)
+        print(f"\nInitial losses (epoch 0):")
+        print(f"  loss_pde: {float(init_aux['loss_pde']):.6f}")
+        print(f"  loss_data: {float(init_aux['loss_data']):.6f}")
+        print(f"  total: {float(init_loss):.6f}")
+        print("=" * 60)
+
+        # JIT compile update step
         @jit
         def update_step(beta, opt_state, rng_key):
             """Single optimization step."""
@@ -126,6 +101,14 @@ class IGNOInverter:
             self.rng, step_rng = random.split(self.rng)
             beta, opt_state, loss, aux = update_step(beta, opt_state, step_rng)
 
+            # DEBUG: Print at specific epochs
+            if epoch in [0, 1, 10, 50, 100, 250, 499]:
+                print(f"\nEpoch {epoch}:")
+                print(f"  loss_pde: {float(aux['loss_pde']):.6f}")
+                print(f"  loss_data: {float(aux['loss_data']):.6f}")
+                print(f"  total: {float(loss):.6f}")
+                print(f"  beta mean: {float(jnp.mean(beta)):.6f}, std: {float(jnp.std(beta)):.6f}")
+
             if verbose and (epoch + 1) % 100 == 0:
                 iterator.set_postfix({
                     'loss': f'{float(loss):.4f}',
@@ -133,21 +116,32 @@ class IGNOInverter:
                     'data': f'{float(aux["loss_data"]):.4f}',
                 })
 
+        # DEBUG: Final stats
+        print("\n" + "=" * 60)
+        print("JAX DEBUG - INVERSION END")
+        print("=" * 60)
+        print(f"Final beta mean: {float(jnp.mean(beta)):.6f}")
+        print(f"Final beta std: {float(jnp.std(beta)):.6f}")
+        print(f"Final beta[0, :5]: {beta[0, :5]}")
+
+        # Compute final losses
+        self.rng, final_rng = random.split(self.rng)
+        final_loss, final_aux = loss_fn(beta, final_rng)
+        print(f"Final loss_pde: {float(final_aux['loss_pde']):.6f}")
+        print(f"Final loss_data: {float(final_aux['loss_data']):.6f}")
+        print("=" * 60)
+
         return beta
 
     def _create_optimizer(self, config: InversionConfig) -> optax.GradientTransformation:
         """Create optimizer for inversion."""
         opt_cfg = config.optimizer
-
-        # Base learning rate
         lr = opt_cfg.lr
 
-        # Create schedule if specified
         if config.scheduler is not None and config.scheduler.type is not None:
             sched_cfg = config.scheduler
 
             if sched_cfg.type == 'StepLR':
-                # For inversion, step_size is already in optimizer steps (not epochs)
                 schedule = optax.exponential_decay(
                     init_value=lr,
                     transition_steps=sched_cfg.step_size,
@@ -163,7 +157,6 @@ class IGNOInverter:
                 )
                 lr = schedule
 
-        # Create optimizer
         OPTIMIZERS = {
             'Adam': optax.adam,
             'AdamW': optax.adamw,

@@ -41,8 +41,6 @@ from src.utils.solver_utils import get_model
 def mollifier(u: jax.Array, x: jax.Array) -> jax.Array:
     """Apply mollifier boundary condition
 
-    FIXED: Now adds trailing dimension to match PyTorch behavior.
-
     Args:
         u: Solution (batch, n_points) or (n_points,)
         x: Coordinates (batch, n_points, 2) or (n_points, 2)
@@ -52,7 +50,7 @@ def mollifier(u: jax.Array, x: jax.Array) -> jax.Array:
     """
     pi = jnp.pi
     result = u * jnp.sin(pi * x[..., 0]) * jnp.sin(pi * x[..., 1])
-    return result[..., None]  # FIXED: Add trailing dimension
+    return result[..., None]
 
 
 @jit
@@ -214,7 +212,7 @@ def compute_pde_residual_single_sample(
         use_batched_grad: If True, use more efficient batched gradient computation
 
     Returns:
-        residual: PDE residual (nc,)
+        residual: PDE residual (nc,) - NOT squared, to match PyTorch behavior
     """
     nc = xc.shape[0]
 
@@ -261,8 +259,10 @@ def compute_pde_residual_single_sample(
     # Right side: ∫ f * v dx
     right = (f * v_flat).reshape(nc, n_grid).mean(axis=-1)  # (nc,)
 
-    # Residual
-    residual = (left - right) ** 2
+    # Residual: DO NOT square here!
+    # The caller (loss_pde_from_beta) will take L2 norm which squares
+    # PyTorch does: torch.norm(left - right, 2, 1) = sqrt(sum((left-right)^2))
+    residual = left - right
 
     return residual
 
@@ -342,11 +342,10 @@ class DarcyContinuous(ProblemInstance):
         print("Problem initialized (parameters not yet initialized)")
 
     def _load_data(self, path: str) -> Tuple[Dict, jax.Array]:
-        """Load data from npy directory"""
+        """Load data from mat file"""
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"Data path not found: {path}")
-
 
         data = h5py.File(path, mode='r')
 
@@ -426,7 +425,7 @@ class DarcyContinuous(ProblemInstance):
         }
 
     # =========================================================================
-    # NEW: Model configuration methods for trainer
+    # Model configuration methods for trainer
     # =========================================================================
 
     def get_sample_inputs(self, batch_size: int) -> Dict[str, Dict[str, jax.Array]]:
@@ -485,11 +484,14 @@ class DarcyContinuous(ProblemInstance):
             rng: jax.Array
     ) -> jnp.ndarray:
         """PDE residual loss during training
+
         Uses RBF interpolator on TRUE coefficient field.
+
         Args:
             params: Model parameters
             a: Coefficient field (batch, n_points, 1)
             rng: PRNG key
+
         Returns:
             PDE loss (scalar)
         """
@@ -505,7 +507,7 @@ class DarcyContinuous(ProblemInstance):
             n_center=nc,
             R_max=1e-4,
             R_min=1e-4,
-            key=subkey  # FIXED: Added key parameter
+            key=subkey
         )
 
         # Compute coefficient values at collocation points using RBF
@@ -535,14 +537,15 @@ class DarcyContinuous(ProblemInstance):
 
         # Vmap over batch
         residuals = vmap(compute_residual_for_sample)(beta, a_vals)
-        # residuals: (n_batch, nc)
+        # residuals: (n_batch, nc) - these are (left - right), not squared
 
-        # Combine residuals
-        # Use same strategy as PyTorch: MSE + top-k sorting
-        mse_loss = jnp.mean(residuals)
+        # Combine residuals - match PyTorch: get_loss(left, right) + top_k_loss
+        # get_loss computes MSE, so we need to square
+        residuals_squared = residuals ** 2
+        mse_loss = jnp.mean(residuals_squared)
 
-        # Sort and take top 10*nc largest residuals
-        residuals_flat = residuals.reshape(-1)
+        # Sort and take top 10*nc largest squared residuals
+        residuals_flat = residuals_squared.reshape(-1)
         residuals_sorted = jnp.sort(residuals_flat)[::-1]  # Descending
         top_k_loss = jnp.sum(residuals_sorted[:nc * 10])
 
@@ -602,7 +605,7 @@ class DarcyContinuous(ProblemInstance):
         # Predict solution
         u_pred = self.models['u'].apply({'params': params['u']}, x, beta)
         u_pred = u_pred[..., None] if u_pred.ndim == 2 else u_pred
-        u_pred = mollifier(u_pred.squeeze(-1), x)  # FIXED: Now adds dimension
+        u_pred = mollifier(u_pred.squeeze(-1), x)
 
         # Compute error
         return self.get_error(u_pred, u)
@@ -632,13 +635,12 @@ class DarcyContinuous(ProblemInstance):
         n_batch = beta.shape[0]
 
         # Generate collocation points
-        # FIXED: Pass key explicitly
         rng, subkey = random.split(rng)
         xc, R = self.genPoint.weight_centers(
             n_center=nc,
             R_max=1e-4,
             R_min=1e-4,
-            key=subkey  # FIXED: Added key parameter
+            key=subkey
         )
 
         # Transform grid
@@ -668,10 +670,11 @@ class DarcyContinuous(ProblemInstance):
 
         # Vmap over batch
         residuals = vmap(compute_residual_for_sample)(beta, a_decoded)
-        # residuals: (n_batch, nc)
+        # residuals: (n_batch, nc) - these are (left - right), not squared
 
-        # Mean residual over centers, then mean over batch
-        loss_per_sample = jnp.linalg.norm(residuals, axis=1)
+        # Match PyTorch: torch.norm(left - right, 2, 1) = sqrt(sum((left-right)^2))
+        # This is L2 norm over the nc dimension for each sample
+        loss_per_sample = jnp.linalg.norm(residuals, axis=1)  # (n_batch,)
         return jnp.mean(loss_per_sample)
 
     def loss_data_from_beta(
@@ -702,7 +705,7 @@ class DarcyContinuous(ProblemInstance):
         elif target_type == 'u':
             pred = self.models['u'].apply({'params': params['u']}, x, beta)
             pred = pred[..., None] if pred.ndim == 2 else pred
-            pred = mollifier(pred.squeeze(-1), x)  # FIXED: Now adds dimension
+            pred = mollifier(pred.squeeze(-1), x)
             # Relative loss per sample
             loss_per_sample = jnp.linalg.norm(pred - target, axis=1) / jnp.linalg.norm(target, axis=1)
             return jnp.mean(loss_per_sample)
@@ -733,7 +736,7 @@ class DarcyContinuous(ProblemInstance):
         if target_type == 'u':
             pred = self.models['u'].apply({'params': params['u']}, x, beta)
             pred = pred[..., None] if pred.ndim == 2 else pred
-            pred = mollifier(pred.squeeze(-1), x)  # FIXED: Now adds dimension
+            pred = mollifier(pred.squeeze(-1), x)
 
         elif target_type == 'a':
             pred = self.models['a'].apply({'params': params['a']}, x, beta)
@@ -764,7 +767,7 @@ class DarcyContinuous(ProblemInstance):
         """
         u_pred = self.models['u'].apply({'params': params['u']}, x, beta)
         u_pred = u_pred[..., None] if u_pred.ndim == 2 else u_pred
-        u_pred = mollifier(u_pred.squeeze(-1), x)  # FIXED: Now adds dimension
+        u_pred = mollifier(u_pred.squeeze(-1), x)
 
         a_pred = self.models['a'].apply({'params': params['a']}, x, beta)
         a_pred = a_pred[..., None]
@@ -795,7 +798,6 @@ class DarcyContinuous(ProblemInstance):
             beta: Latent samples (num_samples, latent_dim)
         """
         nf = self.models['nf']
-        # Note: nf.sample signature is (rng, num_samples)
         return nf.apply(
             {'params': params['nf']},
             rng,
