@@ -7,7 +7,6 @@ requires-python = ">=3.11,<3.12"
 dependencies = [
     "flax>=0.8.4",
     "h5py>=3.10.0",
-    "jax[cuda12]==0.4.26",
     "matplotlib>=3.8.0",
     "numpy>=1.26.0,<2.0",
     "optax>=0.2.2",
@@ -25,12 +24,8 @@ dev = [
     "ipykernel>=7.1.0",
     "jupyter>=1.0.0",
     "pytest>=8.0.0",
+    "jax[cuda12]==0.4.26",
 ]
-
-[tool.uv.sources]
-jaxlib = { index = "jax-cuda" }
-
-[[tool.uv.index]]
-name = "jax-cuda"
-url = "https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"
-explicit = true
+slurm = [
+    "jax[cuda12_local]==0.4.35",
+]
