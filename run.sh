@@ -2,8 +2,8 @@
 #SBATCH --job-name=jigno
 #SBATCH --partition=general,insy
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=2
-#SBATCH --mem=32G
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=48G
 #SBATCH --gres=gpu:a40:1
 #SBATCH --output=/tmp/slurm_job_%j.out
 #SBATCH --error=/tmp/slurm_job_%j.err
@@ -46,8 +46,6 @@ nvidia-smi
 
 CONTAINER="${PROJECT_DIR}/jigno.sif"
 [[ ! -f "$CONTAINER" ]] && { echo "ERROR: container not found. Run ./build.sh first"; exit 1; }
-
-echo "WE HERE!"
 
 case "$MODE" in
     train)    SCRIPT="training.py" ;;

@@ -28,9 +28,6 @@ dev = [
 ]
 
 [tool.uv.sources]
-# We only map jaxlib here.
-# 'jax' will be pulled from PyPI (standard),
-# which then triggers the search for 'jaxlib' on this index.
 jaxlib = { index = "jax-cuda" }
 
 [[tool.uv.index]]
