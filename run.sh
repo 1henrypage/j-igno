@@ -3,7 +3,7 @@
 #SBATCH --partition=general,insy
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
-#SBATCH --mem=48G
+#SBATCH --mem=32G
 #SBATCH --gres=gpu:a40:1
 #SBATCH --output=/tmp/slurm_job_%j.out
 #SBATCH --error=/tmp/slurm_job_%j.err
