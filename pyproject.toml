@@ -29,3 +29,11 @@ dev = [
 slurm = [
     "jax[cuda12_local]==0.4.35",
 ]
+
+[tool.uv]
+conflicts = [
+    [
+        { extra = "dev" },
+        { extra = "slurm" },
+    ],
+]

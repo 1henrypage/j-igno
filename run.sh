@@ -58,4 +58,4 @@ apptainer exec --nv -C \
     --env UV_CACHE_DIR=/workspace/.uv_cache \
     --env UV_PYTHON_INSTALL_DIR=/workspace/.uv_python \
     "$CONTAINER" \
-    uv run python "$SCRIPT" --config "$CONFIG" "$@"
+    uv run --extra slurm python "$SCRIPT" --config "$CONFIG" "$@"

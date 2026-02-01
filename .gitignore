@@ -12,7 +12,6 @@
 *.pyc
 *.DS_Store
 
-data/**/*.mat
 slurm_logs/
 
 # STANDARD PYTHON GITIGNORE
