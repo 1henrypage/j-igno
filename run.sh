@@ -40,7 +40,6 @@ echo "Mode: $MODE"
 echo "Config: $CONFIG"
 nvidia-smi
 
-# Validate
 [[ "$MODE" != "train" && "$MODE" != "evaluate" ]] && { echo "ERROR: mode must be train or evaluate"; exit 1; }
 [[ ! -f "$CONFIG" ]] && { echo "ERROR: config not found: $CONFIG"; exit 1; }
 
@@ -52,11 +51,11 @@ case "$MODE" in
     evaluate) SCRIPT="evaluate.py" ;;
 esac
 
-# -C isolates container filesystem
-# --nv enables GPU
-# --bind mounts project dir to /workspace
 apptainer exec --nv -C \
     --bind "${PROJECT_DIR}:/workspace" \
     --pwd /workspace \
+    --env XLA_FLAGS="--xla_gpu_cuda_data_dir=/usr/local/cuda" \
+    --env UV_CACHE_DIR=/workspace/.uv_cache \
+    --env UV_PYTHON_INSTALL_DIR=/workspace/.uv_python \
     "$CONTAINER" \
     uv run python "$SCRIPT" --config "$CONFIG" "$@"
