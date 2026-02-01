@@ -7,6 +7,15 @@ from jax import random, jit
 from flax import linen as nn
 from typing import Tuple
 from functools import partial
+from jax.nn.initializers import variance_scaling, uniform
+
+
+# ============================================================================
+# PyTorch-compatible initializers
+# ============================================================================
+
+_pytorch_kernel_init = variance_scaling(1.0/3.0, "fan_in", "uniform")
+_pytorch_bias_init = uniform(scale=0.1)
 
 
 # ============================================================================
@@ -217,11 +226,11 @@ class FCNN(nn.Module):
 
     @nn.compact
     def __call__(self, x: jax.Array) -> jax.Array:
-        x = nn.Dense(self.hidden_dim)(x)
+        x = nn.Dense(self.hidden_dim, kernel_init=_pytorch_kernel_init, bias_init=_pytorch_bias_init)(x)
         x = jax.nn.silu(x)
-        x = nn.Dense(self.hidden_dim)(x)
+        x = nn.Dense(self.hidden_dim, kernel_init=_pytorch_kernel_init, bias_init=_pytorch_bias_init)(x)
         x = jax.nn.silu(x)
-        x = nn.Dense(self.out_dim)(x)
+        x = nn.Dense(self.out_dim, kernel_init=_pytorch_kernel_init, bias_init=_pytorch_bias_init)(x)
         return x
 
 
@@ -314,7 +323,7 @@ class RealNVP(nn.Module):
     dim: int
     num_flows: int = 3
     hidden_dim: int = 64
-    K: int = 5
+    K: int = 6
     B: float = 3.0
 
     def setup(self):

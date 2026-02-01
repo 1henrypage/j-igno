@@ -229,5 +229,29 @@ class EncoderCNNet2dTanh(nn.Module):
         Returns:
             beta: Latent code in [-1, 1] (n_batch, latent_dim)
         """
+
         beta = self.encoder(x)
-        return jnp.tanh(beta)
+        # DEBUG: Print pre-tanh statistics (this is the critical diagnostic)
+        # Note: jax.debug.print doesn't support format specifiers inside grad
+        # jax.debug.print(
+        #     "[EncoderCNNet2dTanh] PRE-TANH beta: mean={m}, std={s}, min={mn}, max={mx}",
+        #     m=jnp.mean(beta), s=jnp.std(beta), mn=jnp.min(beta), mx=jnp.max(beta)
+        # )
+
+        # DEBUG: Check for values that will saturate tanh
+        # num_saturated_high = jnp.sum(beta > 2.0)
+        # num_saturated_low = jnp.sum(beta < -2.0)
+        # jax.debug.print(
+        #     "[EncoderCNNet2dTanh] PRE-TANH saturation check: {nh} values > 2.0, {nl} values < -2.0 (out of {total})",
+        #     nh=num_saturated_high, nl=num_saturated_low, total=beta.size
+        # )
+
+        beta_out = jnp.tanh(beta)
+
+        # DEBUG: Print post-tanh statistics
+        # jax.debug.print(
+        #     "[EncoderCNNet2dTanh] POST-TANH beta: mean={m}, std={s}, min={mn}, max={mx}",
+        #     m=jnp.mean(beta_out), s=jnp.std(beta_out), mn=jnp.min(beta_out), mx=jnp.max(beta_out)
+        # )
+
+        return beta_out

@@ -299,24 +299,26 @@ class ProblemInstance(ABC):
         self._run_nf_diagnostics(epoch, params, sample_data['a'], logger)
 
     def _run_nf_diagnostics(
-            self,
-            epoch: int,
-            params: Dict[str, Any],
-            a_sample: jnp.ndarray,
-            logger: Callable[[str, float, int], None]
+        self,
+        epoch: int,
+        params: Dict[str, Any],
+        a_sample: jnp.ndarray,
+        logger: Callable[[str, float, int], None]
     ) -> None:
         """Detailed monitoring of NF health
 
         Checks:
         - Z-space statistics (should be ~N(0,1))
         - Dead dimensions (std < 0.1)
-        - Invertibility (roundtrip error)
+        - Invertibility (roundtrip error: beta -> z -> beta_rec)
+        - Inverse sampling check (z -> beta from prior samples)
+        - Beta hypercube violations (values outside [-1, 1])
         - Log-det stability
         """
         nf = self.models['nf']
         enc = self.models['enc']
 
-        # Get latents
+        # Get latents from encoder
         beta = enc.apply({'params': params['enc']}, a_sample)
 
         # Forward through NF: beta -> z
@@ -341,9 +343,43 @@ class ProblemInstance(ABC):
         )
         rec_err = float(jnp.mean(jnp.abs(beta - beta_rec)))
 
+        # === NEW: Inverse sampling check (z ~ N(0,1) -> beta) ===
+        # Sample fresh z from standard normal and map to beta space
+        self.rng, sample_key = random.split(self.rng)
+        n_samples = a_sample.shape[0]
+        z_prior = random.normal(sample_key, (n_samples, beta.shape[1]))
+
+        beta_sampled, log_det_inv = nf.apply(
+            {'params': params['nf']},
+            z_prior,
+            method=nf.inverse
+        )
+
+        # === NEW: Hypercube analysis for encoded betas ===
+        beta_min = float(jnp.min(beta))
+        beta_max = float(jnp.max(beta))
+        beta_outside_hypercube = jnp.abs(beta) > 1.0
+        n_violations_enc = int(jnp.sum(beta_outside_hypercube))
+        frac_violations_enc = float(jnp.mean(beta_outside_hypercube))
+
+        # Per-dimension analysis for encoded betas
+        dims_with_violations_enc = int(jnp.sum(jnp.any(beta_outside_hypercube, axis=0)))
+
+        # === NEW: Hypercube analysis for sampled betas ===
+        beta_sampled_min = float(jnp.min(beta_sampled))
+        beta_sampled_max = float(jnp.max(beta_sampled))
+        beta_sampled_outside = jnp.abs(beta_sampled) > 1.0
+        n_violations_sampled = int(jnp.sum(beta_sampled_outside))
+        frac_violations_sampled = float(jnp.mean(beta_sampled_outside))
+
+        # Per-dimension analysis for sampled betas
+        dims_with_violations_sampled = int(jnp.sum(jnp.any(beta_sampled_outside, axis=0)))
+
         # Log-det analysis
         ldj_mean = float(jnp.mean(log_det_fwd))
         ldj_std = float(jnp.std(log_det_fwd))
+        ldj_inv_mean = float(jnp.mean(log_det_inv))
+        ldj_inv_std = float(jnp.std(log_det_inv))
 
         # Logging to TensorBoard
         logger("nf_health/z_mean_avg", z_mean_total, epoch)
@@ -354,12 +390,30 @@ class ProblemInstance(ABC):
         logger("nf_health/log_det_mean", ldj_mean, epoch)
         logger("nf_health/log_det_std", ldj_std, epoch)
 
+        # NEW: Hypercube metrics
+        logger("nf_health/beta_enc_min", beta_min, epoch)
+        logger("nf_health/beta_enc_max", beta_max, epoch)
+        logger("nf_health/beta_enc_violations_frac", frac_violations_enc, epoch)
+        logger("nf_health/beta_enc_dims_with_violations", float(dims_with_violations_enc), epoch)
+
+        logger("nf_health/beta_sampled_min", beta_sampled_min, epoch)
+        logger("nf_health/beta_sampled_max", beta_sampled_max, epoch)
+        logger("nf_health/beta_sampled_violations_frac", frac_violations_sampled, epoch)
+        logger("nf_health/beta_sampled_dims_with_violations", float(dims_with_violations_sampled), epoch)
+
+        logger("nf_health/log_det_inv_mean", ldj_inv_mean, epoch)
+        logger("nf_health/log_det_inv_std", ldj_inv_std, epoch)
+
         # Console output
         print(f"  [NF Health] Roundtrip Err: {rec_err:.2e} | "
               f"Dead Dims: {dead_dims}/{z_out.shape[1]} | "
               f"Exploding Dims: {exploding_dims}/{z_out.shape[1]}")
         print(f"  [NF Health] Z-Space: Mean={z_mean_total:.3f}, Std={z_std_total:.3f} | "
               f"LogDet: mean={ldj_mean:.2f}, std={ldj_std:.2f}")
+        print(f"  [NF Health] Beta (enc): range=[{beta_min:.3f}, {beta_max:.3f}] | "
+              f"Outside [-1,1]: {frac_violations_enc*100:.1f}% ({dims_with_violations_enc}/{beta.shape[1]} dims)")
+        print(f"  [NF Health] Beta (sampled): range=[{beta_sampled_min:.3f}, {beta_sampled_max:.3f}] | "
+              f"Outside [-1,1]: {frac_violations_sampled*100:.1f}% ({dims_with_violations_sampled}/{beta.shape[1]} dims)")
 
         # Warnings
         if dead_dims > (z_out.shape[1] // 2):
@@ -377,6 +431,17 @@ class ProblemInstance(ABC):
         if z_std_total < 0.5 or z_std_total > 2.0:
             print("  ⚠️ WARNING: Z-space std far from 1. "
                   "Flow may not be mapping to standard normal.")
+
+        # NEW: Hypercube warnings
+        if frac_violations_enc > 0.1:
+            print(f"  ⚠️ WARNING: {frac_violations_enc*100:.1f}% of encoded betas outside [-1,1]. "
+                  "Encoder may need regularization or output activation.")
+        if frac_violations_sampled > 0.1:
+            print(f"  ⚠️ WARNING: {frac_violations_sampled*100:.1f}% of NF-sampled betas outside [-1,1]. "
+                  "Flow prior may not match encoder distribution well.")
+        if abs(beta_sampled_max) > 3.0 or abs(beta_sampled_min) > 3.0:
+            print(f"  ⚠️ WARNING: Sampled betas have extreme values (range [{beta_sampled_min:.2f}, {beta_sampled_max:.2f}]). "
+                  "NF may be producing out-of-distribution samples.")
 
     # =========================================================================
     # Checkpoint management
