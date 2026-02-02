@@ -323,7 +323,7 @@ class RealNVP(nn.Module):
     hidden_dim: int = 64
     K: int = 6
     B: float = 1.0  # Tail bound matches [-1, 1]
-    alpha: float = 3.0  # Beta distribution parameter
+    alpha: float = 30.0  # Beta distribution parameter
 
     def setup(self):
         self.flows = [

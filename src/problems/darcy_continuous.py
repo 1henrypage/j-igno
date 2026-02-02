@@ -272,10 +272,10 @@ class DarcyContinuous(ProblemInstance):
     """Darcy flow problem in JAX with proper PDE loss"""
 
     # Model hyperparameters
-    BETA_SIZE = 18
+    BETA_SIZE = 12
     HIDDEN_SIZE = 100
-    NF_NUM_FLOWS = 3
-    NF_HIDDEN_DIM = 56
+    NF_NUM_FLOWS = 2
+    NF_HIDDEN_DIM = 32
 
     def __init__(
             self,
@@ -369,7 +369,7 @@ class DarcyContinuous(ProblemInstance):
 
         # Encoder
         conv_arch = [1, 64, 64, 64]
-        fc_arch = [64 * 2 * 2, 128, 64, self.BETA_SIZE]
+        fc_arch = [64 * 2 * 2, 64, 32, self.BETA_SIZE]
         model_enc = EncoderCNNet2dTanh(
             conv_arch=conv_arch,
             fc_arch=fc_arch,
@@ -466,7 +466,7 @@ class DarcyContinuous(ProblemInstance):
             Dict mapping model name -> True if should have weight decay
         """
         return {
-            'enc': False,
+            'enc': True,
             'u': True,
             'a': True,
             'nf': False,
