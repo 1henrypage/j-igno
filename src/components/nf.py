@@ -4,6 +4,7 @@
 import jax
 import jax.numpy as jnp
 from jax import random, jit
+from jax.scipy.stats import beta as beta_dist
 from flax import linen as nn
 from typing import Tuple
 from functools import partial
@@ -49,7 +50,7 @@ def unconstrained_RQS(
         unnormalized_heights: jax.Array,
         unnormalized_derivatives: jax.Array,
         inverse: bool = False,
-        tail_bound: float = 3.,
+        tail_bound: float = 1.,
         min_bin_width: float = DEFAULT_MIN_BIN_WIDTH,
         min_bin_height: float = DEFAULT_MIN_BIN_HEIGHT,
         min_derivative: float = DEFAULT_MIN_DERIVATIVE
@@ -243,7 +244,7 @@ class NSF_CL(nn.Module):
     dim: int
     hidden_dim: int
     K: int = 5
-    B: float = 3.0
+    B: float = 1.0
 
     def setup(self):
         self.f1 = FCNN(self.dim // 2, (3 * self.K - 1) * (self.dim - self.dim // 2), self.hidden_dim)
@@ -263,11 +264,8 @@ class NSF_CL(nn.Module):
         lower, upper = x[:, :self.dim // 2], x[:, self.dim // 2:]
 
         # Transform upper given lower
-        # f1 output: (batch, (3K-1) * upper_dim)
         out = self.f1(lower).reshape(-1, self.dim - self.dim // 2, 3 * self.K - 1)
-        # out: (batch, upper_dim, 3K-1)
         W, H, D = jnp.split(out, [self.K, 2 * self.K], axis=2)
-        # W, H: (batch, upper_dim, K), D: (batch, upper_dim, K-1)
 
         upper, ld = unconstrained_RQS(upper, W, H, D, inverse=False, tail_bound=self.B)
         log_det = log_det + jnp.sum(ld, axis=1)
@@ -318,13 +316,14 @@ class NSF_CL(nn.Module):
 class RealNVP(nn.Module):
     """Normalizing Flow using Neural Spline Flows
 
-    Maps between latent space β ∈ [-1,1]^d and standard Gaussian z ~ N(0,I).
+    Maps between latent space β ∈ [-1,1]^d and Beta(α,α) base distribution on [-1,1].
     """
     dim: int
     num_flows: int = 3
     hidden_dim: int = 64
     K: int = 6
-    B: float = 3.0
+    B: float = 1.0  # Tail bound matches [-1, 1]
+    alpha: float = 3.0  # Beta distribution parameter
 
     def setup(self):
         self.flows = [
@@ -334,16 +333,15 @@ class RealNVP(nn.Module):
 
         # Fixed permutation (reversal - its own inverse)
         self.perm = jnp.arange(self.dim - 1, -1, -1, dtype=jnp.int32)
-        self.log_2pi = jnp.log(2.0 * jnp.pi)
 
     def __call__(self, x: jax.Array) -> Tuple[jax.Array, jax.Array]:
         """Forward: data x -> latent z
 
         Args:
-            x: Data samples (batch, dim)
+            x: Data samples (batch, dim) in [-1, 1]
 
         Returns:
-            z: Latent samples (batch, dim)
+            z: Latent samples (batch, dim) in [-1, 1]
             log_det: Log determinant (batch,)
         """
         log_det_total = jnp.zeros(x.shape[0])
@@ -360,10 +358,10 @@ class RealNVP(nn.Module):
         """Inverse: latent z -> data x
 
         Args:
-            z: Latent samples (batch, dim)
+            z: Latent samples (batch, dim) in [-1, 1]
 
         Returns:
-            x: Data samples (batch, dim)
+            x: Data samples (batch, dim) in [-1, 1]
             log_det: Log determinant (batch,)
         """
         log_det_total = jnp.zeros(z.shape[0])
@@ -376,6 +374,26 @@ class RealNVP(nn.Module):
 
         return z, log_det_total
 
+    def _beta_log_prob(self, z: jax.Array) -> jax.Array:
+        """Log prob of scaled symmetric Beta(α,α) on [-1, 1]
+
+        Args:
+            z: Samples in [-1, 1] (batch, dim)
+
+        Returns:
+            log_prob: (batch, dim)
+        """
+        # Transform from [-1, 1] to [0, 1]
+        z_01 = (z + 1.0) / 2.0
+
+        # Clamp to avoid numerical issues at boundaries
+        z_01 = jnp.clip(z_01, 1e-6, 1.0 - 1e-6)
+
+        # Beta log prob + Jacobian for the scaling (d/dz of (z+1)/2 = 1/2, so log|J| = -log(2))
+        log_prob = beta_dist.logpdf(z_01, self.alpha, self.alpha) - jnp.log(2.0)
+
+        return log_prob
+
     def log_prob(self, x: jax.Array) -> jax.Array:
         """Compute log p(x) using change of variables
 
@@ -386,7 +404,7 @@ class RealNVP(nn.Module):
             log_prob: Log probability (batch,)
         """
         z, log_det = self(x)
-        log_pz = -0.5 * (z ** 2 + self.log_2pi).sum(axis=1)
+        log_pz = self._beta_log_prob(z).sum(axis=1)
         return log_pz + log_det
 
     def loss(self, x: jax.Array) -> jax.Array:
@@ -408,8 +426,14 @@ class RealNVP(nn.Module):
             num_samples: Number of samples
 
         Returns:
-            samples: Generated samples (num_samples, dim)
+            samples: Generated samples (num_samples, dim) in [-1, 1]
         """
-        z = random.normal(rng, (num_samples, self.dim))
+        # Sample from Beta(α, α) on [0, 1]
+        z_01 = random.beta(rng, a=self.alpha, b=self.alpha, shape=(num_samples, self.dim))
+
+        # Scale to [-1, 1]
+        z = 2.0 * z_01 - 1.0
+
+        # Transform through inverse flow
         x, _ = self.inverse(z)
         return x
