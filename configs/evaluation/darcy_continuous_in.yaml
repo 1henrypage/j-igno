@@ -10,7 +10,7 @@ problem:
 
 # REQUIRED: Pretrained model weights (contains all models: enc, u, a, nf)
 pretrained:
-  path: "./runs/18_dims_lhs/weights/best.pt"
+  path: "./runs/old_prior/weights/best.pt"
 
 # Evaluation settings
 evaluation:
