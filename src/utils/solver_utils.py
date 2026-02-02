@@ -98,18 +98,21 @@ def get_optimizer(
 
     # Create base optimizer
     if optimizer_type == 'AdamW':
-        opt = OPTIMIZERS[optimizer_type](
-            learning_rate=lr,
-            weight_decay=optimizer_config.weight_decay
-        )
+        raise NotImplementedError("DON'T USE THIS!")
+        # opt = OPTIMIZERS[optimizer_type](
+        #     learning_rate=lr,
+        #     weight_decay=optimizer_config.weight_decay
+        # )
     else:
         opt = OPTIMIZERS[optimizer_type](learning_rate=lr)
 
-    # Chain with gradient clipping (no finite check - can't work in JIT)
-    return optax.chain(
-        optax.clip_by_global_norm(clip_grad_norm),
-        opt
-    )
+
+    transforms = [optax.clip_by_global_norm(clip_grad_norm)]
+    if optimizer_config.weight_decay and optimizer_config.weight_decay > 0:
+        transforms.append(optax.add_decayed_weights(optimizer_config.weight_decay))
+    transforms.append(opt)
+
+    return optax.chain(*transforms)
 
 
 def get_scheduler(
