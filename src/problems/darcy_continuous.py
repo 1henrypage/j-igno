@@ -272,10 +272,10 @@ class DarcyContinuous(ProblemInstance):
     """Darcy flow problem in JAX with proper PDE loss"""
 
     # Model hyperparameters
-    BETA_SIZE = 12
+    BETA_SIZE = 18
     HIDDEN_SIZE = 100
     NF_NUM_FLOWS = 2
-    NF_HIDDEN_DIM = 32
+    NF_HIDDEN_DIM = 48
 
     def __init__(
             self,

@@ -321,7 +321,7 @@ class RealNVP(nn.Module):
     dim: int
     num_flows: int = 3
     hidden_dim: int = 64
-    K: int = 6
+    K: int = 5
     B: float = 1.0  # Tail bound matches [-1, 1]
     alpha: float = 30.0  # Beta distribution parameter
 

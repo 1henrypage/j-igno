@@ -25,7 +25,7 @@ training:
   optimizer:
     type: Adam
     lr: 0.001
-    weight_decay: 0.00001
+    weight_decay: 0.00005
   scheduler:
     type: StepLR
     step_size: 2500
