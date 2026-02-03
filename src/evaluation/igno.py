@@ -35,12 +35,19 @@ class IGNOInverter:
         batch_size = x_obs.shape[0]
 
         # Initialize: sample from NF prior
-        self.rng, sample_rng = random.split(self.rng)
-        beta_init = self.problem.sample_latent_from_nf(
-            params=self.frozen_params,
-            num_samples=batch_size,
-            rng=sample_rng
+        # Initialize at mode: z=0 is the mode of Beta(α,α)
+        z_mode = jnp.zeros((batch_size, self.problem.BETA_SIZE))
+        beta_init, _ = self.problem.models['nf'].apply(
+            {'params': self.frozen_params['nf']},
+            z_mode,
+            method=self.problem.models['nf'].inverse
         )
+        # self.rng, sample_rng = random.split(self.rng)
+        # beta_init = self.problem.sample_latent_from_nf(
+        #     params=self.frozen_params,
+        #     num_samples=batch_size,
+        #     rng=sample_rng
+        # )
 
         # DEBUG: Initial beta stats
         print("=" * 60)
