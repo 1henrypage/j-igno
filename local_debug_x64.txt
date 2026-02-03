@@ -1,0 +1,49 @@
+============================================================
+JAX NUMERICAL DIAGNOSTICS
+============================================================
+JAX version: 0.4.26
+Devices: [cuda(id=0)]
+Default matmul precision: float32
+x64 enabled: True
+
+TEST 1: Random number generation
+  normal(key=42, shape=5): [ 0.3690043  -0.46067523 -0.86509352  1.20808848  1.00306531]
+  hash: 720ecbbb164d
+
+TEST 2: Basic autodiff
+  grad(sum(x^2)) at [1,2,3]: [2. 4. 6.]
+
+TEST 3: Second-order gradients
+  params: [3.14 0.5 ]
+  loss: 33.6561070156
+  grad: [ 35.05643  -13.733574]
+
+TEST 4: Matrix operations (varying scales)
+  scale=1e-03: matmul sum=-0.0001841400, std=0.0000078462
+  scale=1e+00: matmul sum=-184.1399721436, std=7.8461788893
+  scale=1e+03: matmul sum=-184139972.1436023116, std=7846178.8892751765
+
+TEST 5: Softmax/log-sum-exp stability
+  logsumexp: 28.5320299791
+  softmax sum (should be 1.0): 1.0000000000
+
+TEST 6: Chained linear layers (encoder-like)
+  input shape: (16, 64), output shape: (16, 8)
+  output mean: -0.0179654110
+  output std: 0.0759150683
+  output hash: 1a35eb375098
+
+TEST 7: Gradient through MLP
+  grad shape: (16, 64)
+  grad mean: 0.0000026614
+  grad std: 0.0000567777
+  grad hash: e32ae95fa115
+
+TEST 8: JIT consistency
+  result (call 1): 2.0342746641
+  result (call 2): 2.0342746641
+  match: True
+
+============================================================
+DONE - Compare outputs between environments
+============================================================
