@@ -25,7 +25,7 @@ key = jax.random.PRNGKey(42)
 print("TEST 1: Random number generation")
 samples = jax.random.normal(key, (5,))
 print(f"  normal(key=42, shape=5): {samples}")
-h = hashlib.md5(np.array(samples).tobytes()).hexdigest()[:12]
+h = hashlib.md5(jnp.array(samples).tobytes()).hexdigest()[:12]
 print(f"  hash: {h}")
 print()
 
@@ -103,7 +103,7 @@ out = mlp_forward(x_in, keys[1:])
 print(f"  input shape: {x_in.shape}, output shape: {out.shape}")
 print(f"  output mean: {jnp.mean(out):.10f}")
 print(f"  output std: {jnp.std(out):.10f}")
-print(f"  output hash: {hashlib.md5(np.array(out).tobytes()).hexdigest()[:12]}")
+print(f"  output hash: {hashlib.md5(jnp.array(out).tobytes()).hexdigest()[:12]}")
 print()
 
 # =============================================================================
@@ -118,7 +118,7 @@ g = grad(mlp_loss)(x_in, keys[1:])
 print(f"  grad shape: {g.shape}")
 print(f"  grad mean: {jnp.mean(g):.10f}")
 print(f"  grad std: {jnp.std(g):.10f}")
-print(f"  grad hash: {hashlib.md5(np.array(g).tobytes()).hexdigest()[:12]}")
+print(f"  grad hash: {hashlib.md5(jnp.array(g).tobytes()).hexdigest()[:12]}")
 print()
 
 # =============================================================================
