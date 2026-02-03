@@ -1,5 +1,5 @@
 
-run_name: "8_dims"
+run_name: "darcy_continuous"
 artifact_root: "runs"
 seed: 10086
 
