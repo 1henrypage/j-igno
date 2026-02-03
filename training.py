@@ -15,6 +15,7 @@ JAX-specific options:
     python training.py --config configs/training/example_train.yaml --platform gpu
     python training.py --config configs/training/example_train.yaml --disable-jit
 """
+import load_this_before_everything_else
 import argparse
 import sys
 import os
@@ -47,6 +48,8 @@ def main():
     parser.add_argument('--debug-nans', action='store_true',
                         help='Enable NaN debugging (slower)')
 
+
+
     args = parser.parse_args()
 
     # Set platform before importing JAX
@@ -68,6 +71,9 @@ def main():
     print(f"JAX version: {jax.__version__}")
     print(f"JAX devices: {jax.devices()}")
     print(f"JAX default backend: {jax.default_backend()}")
+    print(f"x64 enabled: {jax.config.jax_enable_x64}")
+    print(f"Matmul precision: {jax.config.jax_default_matmul_precision}")
+    print(f"NVIDIA_TF32_OVERRIDE: {os.environ.get('NVIDIA_TF32_OVERRIDE', 'not set')}")
 
     # Import project modules after JAX setup
     sys.path.insert(0, str(Path(__file__).parent))

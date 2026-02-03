@@ -11,9 +11,11 @@ Usage:
     python evaluate.py --config configs/evaluation/example_evaluate.yaml --snr-db 50
     python evaluate.py --config configs/evaluation/example_evaluate.yaml --batch-size 64
 """
+import load_this_before_everything_else
 import argparse
 import json
 import sys
+import os
 from pathlib import Path
 from datetime import datetime
 
@@ -254,6 +256,11 @@ def main():
     print(f"Config: {args.config}")
     print(f"Problem: {config.problem.type}")
     print(f"JAX devices: {jax.devices()}")
+
+    # JAX INFO
+    print(f"x64 enabled: {jax.config.jax_enable_x64}")
+    print(f"Matmul precision: {jax.config.jax_default_matmul_precision}")
+    print(f"NVIDIA_TF32_OVERRIDE: {os.environ.get('NVIDIA_TF32_OVERRIDE', 'not set')}")
 
     # Run evaluation
     results = evaluate(config, verbose=not args.quiet)
