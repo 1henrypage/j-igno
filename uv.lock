@@ -674,6 +674,7 @@ dependencies = [
     { name = "h5py" },
     { name = "matplotlib" },
     { name = "numpy" },
+    { name = "numpyro" },
     { name = "optax", version = "0.2.2", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-6-j-igno-dev'" },
     { name = "optax", version = "0.2.5", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-6-j-igno-slurm' or extra != 'extra-6-j-igno-dev'" },
     { name = "pandas" },
@@ -706,6 +707,7 @@ requires-dist = [
     { name = "jupyter", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "matplotlib", specifier = ">=3.8.0" },
     { name = "numpy", specifier = ">=1.26.0,<2.0" },
+    { name = "numpyro", specifier = ">=0.19.0" },
     { name = "optax", specifier = ">=0.2.2" },
     { name = "pandas", specifier = ">=2.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
@@ -764,11 +766,11 @@ resolution-markers = [
     "sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "jaxlib", version = "0.4.34", source = { registry = "https://pypi.org/simple" } },
-    { name = "ml-dtypes" },
-    { name = "numpy" },
-    { name = "opt-einsum" },
-    { name = "scipy" },
+    { name = "jaxlib", version = "0.4.34", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-6-j-igno-slurm' or extra != 'extra-6-j-igno-dev'" },
+    { name = "ml-dtypes", marker = "extra == 'extra-6-j-igno-slurm' or extra != 'extra-6-j-igno-dev'" },
+    { name = "numpy", marker = "extra == 'extra-6-j-igno-slurm' or extra != 'extra-6-j-igno-dev'" },
+    { name = "opt-einsum", marker = "extra == 'extra-6-j-igno-slurm' or extra != 'extra-6-j-igno-dev'" },
+    { name = "scipy", marker = "extra == 'extra-6-j-igno-slurm' or extra != 'extra-6-j-igno-dev'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/e3/34/21da583b9596e72bb8e95b6197dee0a44b96b9ea2c147fccabd43ca5515b/jax-0.4.35.tar.gz", hash = "sha256:c0c986993026b10bf6f607fecb7417377460254640766ce40f1fef3fd139c12e", size = 1861189, upload-time = "2024-10-22T20:56:36.379Z" }
 wheels = [
@@ -873,9 +875,9 @@ resolution-markers = [
     "sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "ml-dtypes" },
-    { name = "numpy" },
-    { name = "scipy" },
+    { name = "ml-dtypes", marker = "extra == 'extra-6-j-igno-slurm' or extra != 'extra-6-j-igno-dev'" },
+    { name = "numpy", marker = "extra == 'extra-6-j-igno-slurm' or extra != 'extra-6-j-igno-dev'" },
+    { name = "scipy", marker = "extra == 'extra-6-j-igno-slurm' or extra != 'extra-6-j-igno-dev'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/bf/14/00a3385532d72ab51bd8e9f8c3e19a2e257667955565e9fc10236771dd06/jaxlib-0.4.34-cp311-cp311-macosx_10_14_x86_64.whl", hash = "sha256:8ee3f93836e53c86556ccd9449a4ea43516ee05184d031a71dd692e81259f7d9", size = 87420889, upload-time = "2024-10-04T14:37:56.047Z" },
@@ -1334,6 +1336,15 @@ wheels = [
 ]
 
 [[package]]
+name = "multipledispatch"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/fe/3e/a62c3b824c7dec33c4a1578bcc842e6c30300051033a4e5975ed86cc2536/multipledispatch-1.0.0.tar.gz", hash = "sha256:5c839915465c68206c3e9c473357908216c28383b425361e5d144594bf85a7e0", size = 12385, upload-time = "2023-06-27T16:45:11.074Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/51/c0/00c9809d8b9346eb238a6bbd5f83e846a4ce4503da94a4c08cb7284c325b/multipledispatch-1.0.0-py3-none-any.whl", hash = "sha256:0c53cd8b077546da4e48869f49b13164bebafd0c2a5afceb6bb6a316e7fb46e4", size = 12818, upload-time = "2023-06-27T16:45:09.418Z" },
+]
+
+[[package]]
 name = "nbclient"
 version = "0.10.4"
 source = { registry = "https://pypi.org/simple" }
@@ -1439,6 +1450,24 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/df/a0/4e0f14d847cfc2a633a1c8621d00724f3206cfeddeb66d35698c4e2cf3d2/numpy-1.26.4-cp311-cp311-musllinux_1_1_x86_64.whl", hash = "sha256:60dedbb91afcbfdc9bc0b1f3f402804070deed7392c23eb7a7f07fa857868e8a", size = 18093567, upload-time = "2024-02-05T23:54:11.696Z" },
     { url = "https://files.pythonhosted.org/packages/d2/b7/a734c733286e10a7f1a8ad1ae8c90f2d33bf604a96548e0a4a3a6739b468/numpy-1.26.4-cp311-cp311-win32.whl", hash = "sha256:1af303d6b2210eb850fcf03064d364652b7120803a0b872f5211f5234b399f20", size = 5968812, upload-time = "2024-02-05T23:54:26.453Z" },
     { url = "https://files.pythonhosted.org/packages/3f/6b/5610004206cf7f8e7ad91c5a85a8c71b2f2f8051a0c0c4d5916b76d6cbb2/numpy-1.26.4-cp311-cp311-win_amd64.whl", hash = "sha256:cd25bcecc4974d09257ffcd1f098ee778f7834c3ad767fe5db785be9a4aa9cb2", size = 15811913, upload-time = "2024-02-05T23:54:53.933Z" },
+]
+
+[[package]]
+name = "numpyro"
+version = "0.19.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jax", version = "0.4.26", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-6-j-igno-dev'" },
+    { name = "jax", version = "0.4.35", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-6-j-igno-slurm' or extra != 'extra-6-j-igno-dev'" },
+    { name = "jaxlib", version = "0.4.26", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-6-j-igno-dev'" },
+    { name = "jaxlib", version = "0.4.34", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-6-j-igno-slurm' or extra != 'extra-6-j-igno-dev'" },
+    { name = "multipledispatch" },
+    { name = "numpy" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/02/7c/5d1b55401b023b58f792483c71690315d4d5cd1653fd3631fa5bcbd68601/numpyro-0.19.0.tar.gz", hash = "sha256:bbf5b772a6ba8b7a79448fa6787afb069e5eb2dff8295078c3ec04d3e6276742", size = 404421, upload-time = "2025-08-05T10:26:33.055Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/88/31/9b5da5995988437756bc3f1eead2e314d8916259875c6924cb41692f2b41/numpyro-0.19.0-py3-none-any.whl", hash = "sha256:1063a2c131a0785719e13c8e55f1b82e41850d814df149418097531f4dbdeda8", size = 370906, upload-time = "2025-08-05T10:26:31.35Z" },
 ]
 
 [[package]]

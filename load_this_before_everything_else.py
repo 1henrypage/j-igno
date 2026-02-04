@@ -18,6 +18,7 @@ import os
 # TF32 reduces mantissa precision from 23 to 10 bits, causing numerical
 # instability in PDE gradient computations
 os.environ["NVIDIA_TF32_OVERRIDE"] = "0"
+print("HIGH PRECISION MODE ACTIVATED!!!")
 
 # Now safe to import JAX
 import jax
