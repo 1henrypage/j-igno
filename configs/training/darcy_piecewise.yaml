@@ -1,0 +1,32 @@
+
+run_name: "darcy_piecewise"
+artifact_root: "runs"
+seed: 10086
+
+problem:
+  type: "darcy_piecewise"
+  train_data: "./data/darcy_piecewise/smh_train.mat"
+  test_data: "./data/darcy_piecewise/smh_test_in.mat"
+
+#pretrained:
+#  path: "./runs/2026-xx-xx_xx-xx-xx_darcy_piecewise/weights/best.pt"
+
+# Joint training configuration (encoder + decoders + NF)
+training:
+  epochs: 12500
+  batch_size: 50
+  epoch_show: 200
+
+  # Loss weights for PDE and data terms
+  # Note: May need tuning for piecewise problem
+  loss_weights:
+    pde: 0.25
+    data: 2.0
+  optimizer:
+    type: Adam
+    lr: 0.001
+    weight_decay: 0.000001
+  scheduler:
+    type: StepLR
+    step_size: 2500
+    gamma: 0.5

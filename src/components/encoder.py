@@ -97,6 +97,33 @@ class EncoderFCNet_VAE(nn.Module):
         return beta, mu, log_var
 
 
+class EncoderFCNetTanh(nn.Module):
+    """Fully connected encoder with tanh output"""
+    layers_list: list[int]
+    activation: str | Callable
+    dtype: jnp.dtype = jnp.float32
+
+    def setup(self):
+        self.encoder = EncoderFCNet(
+            layers_list=self.layers_list,
+            activation=self.activation,
+            dtype=self.dtype
+        )
+
+    @nn.compact
+    def __call__(self, x: jax.Array) -> jax.Array:
+        """Encode input to latent space with tanh output
+
+        Args:
+            x: Input (n_batch, n_points, in_size)
+
+        Returns:
+            beta: Latent code in [-1, 1] (n_batch, latent_dim)
+        """
+        beta = self.encoder(x)
+        return jnp.tanh(beta)
+
+
 class EncoderCNNet1d(nn.Module):
     """1D CNN encoder
 
